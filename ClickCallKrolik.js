@@ -260,12 +260,12 @@ class ClickCallManager {
       return;
     }
     const data = this.contacts.map(c => ({
-      'Contato': c.contato,
+      'CONTATO': c.contato,
       'CPF': c.cpf,
-      'Ramal': c.ramal,
-      'Telefone': c.numero,
-      'Já liguei': c.done ? 'Sim' : 'Não',
-      'Observação': c.observacao
+      'RAMAL': c.ramal,
+      'TELEFONE': c.numero,
+      'JÁ LIGUEI': c.done ? 'Sim' : 'Não',
+      'OBSERVAÇÃO': c.observacao
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -358,13 +358,13 @@ class ClickCallManager {
     const tr = document.createElement('tr');
     tr.className = 'edit-row';
     tr.innerHTML = `
-      <td><input type="text" placeholder="Contato" required></td>
-      <td><input type="text" placeholder="Ramal" required></td>
-      <td><input type="text" placeholder="Telefone" required></td>
+      <td><input type="text" placeholder="NOME" required></td>
       <td><input type="text" placeholder="CPF" maxlength="14"></td>
-      <td style="text-align:center;"><input type="checkbox" class="checkbox-done" title="Já liguei"></td>
-      <td><textarea placeholder="Observação" rows="1" style="resize:none;overflow:hidden;width:100%"></textarea></td>
+      <td><input type="text" placeholder="RAMAL" required></td>
+      <td><input type="text" placeholder="TELEFONE" required></td>
+      <td style="text-align:center;"><input type="checkbox" class="checkbox-done" title="JÁ LIGUEI"></td>
       <td class="td-acao"></td>
+      <td><textarea placeholder="OBSERVAÇÃO" rows="1" style="resize:none;overflow:hidden;width:100%"></textarea></td>
     `;
     const tdActions = tr.querySelector('.td-acao');
     const btnSave = this.createButton('Salvar', 'save-btn');
@@ -374,42 +374,42 @@ class ClickCallManager {
     tbody.insertBefore(tr, tbody.firstChild);
 
     // Máscara dinâmica para CPF
-    const cpfInput = tr.children[3].querySelector('input');
+    const cpfInput = tr.children[1].querySelector('input');
     cpfInput.addEventListener('input', function() {
       this.value = formatarCPF(this.value);
     });
 
     // Textarea dinâmica para observação
-    const obsTextarea = tr.children[5].querySelector('textarea');
+    const obsTextarea = tr.children[6].querySelector('textarea');
     obsTextarea.addEventListener('input', function() {
       this.style.height = 'auto';
       this.style.height = (this.scrollHeight) + 'px';
     });
 
     btnSave.onclick = () => {
-      const contato = tr.children[0].querySelector('input').value.trim();
-      const ramal = tr.children[1].querySelector('input').value.trim();
-      const numero = tr.children[2].querySelector('input').value.trim();
-      const cpf = tr.children[3].querySelector('input').value.trim();
-      const done = tr.children[4].querySelector('input').checked;
-      const observacao = tr.children[5].querySelector('textarea').value.trim();
-      if (!contato || !ramal || !numero) {
-        this.showWarning('Preencha todos os campos obrigatórios: Contato, Ramal e Telefone.');
+      const CONTATO = tr.children[0].querySelector('input').value.trim();
+      const CPF = tr.children[1].querySelector('input').value.trim();
+      const RAMAL = tr.children[2].querySelector('input').value.trim();
+      const TELEFONE = tr.children[3].querySelector('input').value.trim();
+      const JALIGUEI = tr.children[4].querySelector('input').checked;
+      const OBSERVAÇÃO = tr.children[6].querySelector('textarea').value.trim();
+      if (!CONTATO || !RAMAL || !TELEFONE) {
+        this.showWarning('Preencha todos os campos obrigatórios: CONTATO, RAMAL e TELEFONE.');
         return;
       }
-      if (!/^[0-9]{7,}$/.test(ramal)) {
-        this.showError('O campo Ramal deve conter apenas números e ter pelo menos 7 dígitos.');
+      if (!/^[0-9]{7,}$/.test(RAMAL)) {
+        this.showError('O campo RAMAL deve conter apenas números e ter pelo menos 7 dígitos.');
         return;
       }
-      if (!/^[0-9]{8,}$/.test(numero)) {
-        this.showError('O campo Telefone deve conter apenas números e ter pelo menos 8 dígitos.');
+      if (!/^[0-9]{8,}$/.test(TELEFONE)) {
+        this.showError('O campo TELEFONE deve conter apenas números e ter pelo menos 8 dígitos.');
         return;
       }
-      if (cpf && !validarCPF(cpf)) {
+      if (CPF && !validarCPF(CPF)) {
         this.showError('CPF inválido.');
         return;
       }
-      this.contacts.unshift({ contato, ramal, numero, cpf, done, observacao });
+      this.contacts.unshift({ contato: CONTATO, cpf: CPF, ramal: RAMAL, numero: TELEFONE, done: JALIGUEI, observacao: OBSERVAÇÃO });
       this.saveContactsToStorage();
       this.currentPage = 1;
       this.applySortAndDisplay();
@@ -482,7 +482,7 @@ class ClickCallManager {
   createContactRow(contact, index) {
     const tr = document.createElement('tr');
     tr.className = 'contact-row';
-    // Nova ordem: Contato, CPF, Ramal, Telefone, Já Liguei, Ação, Observação
+    // Ordem: CONTATO, CPF, RAMAL, TELEFONE, JÁ LIGUEI, AÇÃO, OBSERVAÇÃO
     const callLink = this.createCallLink(contact.ramal, contact.numero);
     tr.innerHTML = `
       <td class="td-contato">${this.escapeHtml(contact.contato)}</td>
@@ -735,15 +735,15 @@ class ClickCallManager {
 
   // Normaliza os dados dos contatos importados
   normalizeContacts(contacts) {
+    // Mapeia apenas os campos exatos das colunas
     return contacts.map((contact, index) => ({
-      id: index + 1,
-      contato: contact.contato || contact.Contato || contact.NOME || '',
-      ramal: contact.ramal || contact.Ramal || contact.RAMAL || '',
-      numero: contact.numero || contact.Numero || contact.TELEFONE || contact.Telefone || contact.telefone || contact.FONE || contact.Fone || contact.fone || '',
-      cpf: contact.cpf || contact.CPF || '',
-      done: contact.done || false,
-      observacao: contact.observacao || contact.Observação || contact.Observacao || contact.OBSERVACAO || ''
-    })).filter(contact => contact.contato || contact.ramal || contact.numero);
+      CONTATO: contact["CONTATO"] || contact["contato"] || contact["Contato"] || contact["NOME"] || '',
+      CPF: contact["CPF"] || contact["cpf"] || '',
+      RAMAL: contact["RAMAL"] || contact["ramal"] || contact["Ramal"] || '',
+      TELEFONE: contact["TELEFONE"] || contact["telefone"] || contact["Telefone"] || contact["NUMERO"] || contact["numero"] || '',
+      "JÁ LIGUEI": (contact["JÁ LIGUEI"] || contact["já liguei"] || contact["done"] || '').toString().toLowerCase() === 'sim',
+      OBSERVAÇÃO: contact["OBSERVAÇÃO"] || contact["observacao"] || contact["Observação"] || contact["OBSERVACAO"] || '',
+    })).filter(contact => contact.CONTATO || contact.RAMAL || contact.TELEFONE);
   }
 
   // Exibe os contatos na tabela
@@ -838,19 +838,20 @@ class ClickCallManager {
     this.showSuccess('Contatos substituídos com sucesso!');
   }
 
+  // Edição de contato
   handleEditContact(tr, contact, index) {
     if (tr.classList.contains('edit-mode')) return;
     tr.classList.add('edit-mode');
     // Salva valores atuais
-    const contatoAtual = contact.contato || '';
-    const ramalAtual = contact.ramal || '';
-    const numeroAtual = contact.numero || '';
-    const cpfAtual = contact.cpf || '';
+    const CONTATO = contact.contato || '';
+    const CPF = contact.cpf || '';
+    const RAMAL = contact.ramal || '';
+    const TELEFONE = contact.numero || '';
     // Substitui células por inputs
-    tr.querySelector('.td-contato').innerHTML = `<input type='text' value='${this.escapeHtml(contatoAtual)}' style='width:100%'>`;
-    tr.querySelector('.td-ramal').innerHTML = `<input type='text' value='${this.escapeHtml(ramalAtual)}' style='width:100%'>`;
-    tr.querySelector('.td-numero').innerHTML = `<input type='text' value='${this.escapeHtml(numeroAtual)}' style='width:100%'>`;
-    tr.querySelector('.td-cpf').innerHTML = `<input type='text' value='${this.escapeHtml(cpfAtual)}' maxlength='14' style='width:100%'>`;
+    tr.querySelector('.td-contato').innerHTML = `<input type='text' value='${this.escapeHtml(CONTATO)}' style='width:100%'>`;
+    tr.querySelector('.td-cpf').innerHTML = `<input type='text' value='${this.escapeHtml(CPF)}' maxlength='14' style='width:100%'>`;
+    tr.querySelector('.td-ramal').innerHTML = `<input type='text' value='${this.escapeHtml(RAMAL)}' style='width:100%'>`;
+    tr.querySelector('.td-numero').innerHTML = `<input type='text' value='${this.escapeHtml(TELEFONE)}' style='width:100%'>`;
     // Observação já é editável inline
     // Substitui toda a coluna Ação por Salvar/Cancelar
     const tdAcao = tr.querySelector('.td-acao');
@@ -865,30 +866,30 @@ class ClickCallManager {
       this.value = formatarCPF(this.value);
     });
     btnSalvar.onclick = () => {
-      const novoContato = tr.querySelector('.td-contato input').value.trim();
-      const novoRamal = tr.querySelector('.td-ramal input').value.trim();
-      const novoNumero = tr.querySelector('.td-numero input').value.trim();
-      const novoCpf = tr.querySelector('.td-cpf input').value.trim();
-      if (!novoContato || !novoRamal || !novoNumero) {
-        this.showWarning('Preencha todos os campos obrigatórios: Contato, Ramal e Telefone.');
+      const novoCONTATO = tr.querySelector('.td-contato input').value.trim();
+      const novoCPF = tr.querySelector('.td-cpf input').value.trim();
+      const novoRAMAL = tr.querySelector('.td-ramal input').value.trim();
+      const novoTELEFONE = tr.querySelector('.td-numero input').value.trim();
+      if (!novoCONTATO || !novoRAMAL || !novoTELEFONE) {
+        this.showWarning('Preencha todos os campos obrigatórios: CONTATO, RAMAL e TELEFONE.');
         return;
       }
-      if (!/^[0-9]{7,}$/.test(novoRamal)) {
-        this.showError('O campo Ramal deve conter apenas números e ter pelo menos 7 dígitos.');
+      if (!/^[0-9]{7,}$/.test(novoRAMAL)) {
+        this.showError('O campo RAMAL deve conter apenas números e ter pelo menos 7 dígitos.');
         return;
       }
-      if (!/^[0-9]{8,}$/.test(novoNumero)) {
-        this.showError('O campo Telefone deve conter apenas números e ter pelo menos 8 dígitos.');
+      if (!/^[0-9]{8,}$/.test(novoTELEFONE)) {
+        this.showError('O campo TELEFONE deve conter apenas números e ter pelo menos 8 dígitos.');
         return;
       }
-      if (novoCpf && !validarCPF(novoCpf)) {
+      if (novoCPF && !validarCPF(novoCPF)) {
         this.showError('CPF inválido.');
         return;
       }
-      contact.contato = novoContato;
-      contact.ramal = novoRamal;
-      contact.numero = novoNumero;
-      contact.cpf = novoCpf;
+      contact.contato = novoCONTATO;
+      contact.cpf = novoCPF;
+      contact.ramal = novoRAMAL;
+      contact.numero = novoTELEFONE;
       this.saveContactsToStorage();
       this.applySortAndDisplay();
     };
