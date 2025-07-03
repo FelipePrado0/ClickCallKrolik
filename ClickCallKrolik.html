@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClickCall - Lista de Contatos</title>
+  <link rel="stylesheet" href="ClickCallKrolik.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div class="banner-borda">
+    <h2>📞 Planilha de Contatos - Ligação em um toque</h2>
+  </div>
+  <label for="upload">Selecione um arquivo Excel ou CSV:</label>
+  <input type="file" id="upload" accept=".xlsx,.csv" title="Selecione um arquivo Excel ou CSV para carregar os contatos">
+  <table id="contactsTable">
+    <thead>
+      <tr>
+        <th>CONTATO</th>
+        <th>CPF</th>
+        <th>RAMAL</th>
+        <th>TELEFONE</th>
+        <th>JÁ LIGUEI</th>
+        <th>AÇÃO</th>
+        <th>OBSERVAÇÃO</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script src="ClickCallKrolik.js"></script>
+</body>
+</html> 
