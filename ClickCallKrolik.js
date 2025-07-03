@@ -549,7 +549,9 @@ class ClickCallManager {
   // Exibe mensagem de estado vazio na tabela
   showEmptyState(tbody) {
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td colspan="5" class="empty-state">Nenhum contato encontrado</td>';
+    // Descobre o número de colunas da tabela dinamicamente
+    const thCount = this.contactsTable.querySelectorAll('thead th').length;
+    tr.innerHTML = `<td colspan="${thCount}" class="empty-state">Nenhum contato encontrado</td>`;
     tbody.appendChild(tr);
   }
 
