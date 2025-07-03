@@ -260,19 +260,19 @@ class ClickCallManager {
       return;
     }
     const data = this.contacts.map(c => ({
-      'CONTATO': c.contato,
-      'CPF': c.cpf,
-      'RAMAL': c.ramal,
-      'TELEFONE': c.numero,
-      'JÁ LIGUEI': c.done ? 'Sim' : 'Não',
-      'OBSERVAÇÃO': c.observacao
+      'NOME': c.NOME || c.CONTATO || c.contato || '',
+      'CPF': c.CPF || c.cpf || '',
+      'RAMAL': c.RAMAL || c.ramal || '',
+      'TELEFONE': c.TELEFONE || c.numero || '',
+      'JÁ LIGUEI': c["JÁ LIGUEI"] ? 'Sim' : 'Não',
+      'AÇÃO': '', // Campo visual, exporta vazio
+      'OBSERVAÇÃO': c.OBSERVAÇÃO || c.observacao || ''
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Contatos');
     const format = this.exportSelect.value;
     // Gera data e hora atuais no formato DD-MM-YYYY_HH-mm
-    // Isso garante que cada exportação tenha um nome único e informativo
     const now = new Date();
     const pad = n => n.toString().padStart(2, '0');
     const dateStr = `${pad(now.getDate())}-${pad(now.getMonth()+1)}-${now.getFullYear()}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
