@@ -499,4 +499,105 @@ select:focus, .per-page-select:focus, .export-select:focus {
   min-width: 100% !important;
   box-sizing: border-box;
   display: block;
+}
+
+/* Estilos para erros de validação */
+.erro-linha {
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  background-color: #fff;
+  border-radius: 4px;
+  border-left: 3px solid #e74c3c;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.erro-linha:last-child {
+  margin-bottom: 0;
+}
+
+.erros-lista {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.erros-lista::-webkit-scrollbar {
+  width: 8px;
+}
+
+.erros-lista::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.erros-lista::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+.erros-lista::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Estilos para modal de código da empresa */
+.ramal-item {
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  background-color: #fff;
+  border-radius: 4px;
+  border-left: 3px solid #3498db;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.ramal-item:last-child {
+  margin-bottom: 0;
+}
+
+.ramais-lista {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.ramais-lista::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ramais-lista::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.ramais-lista::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+.ramais-lista::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+#custom-modal-empresa .modal-confirm-msg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+#custom-modal-empresa #codigo-empresa {
+  display: block;
+  margin: 0 auto 10px auto;
+  text-align: center;
+  font-size: 28px;
+  letter-spacing: 10px;
+  font-weight: bold;
+  width: 70px;
+  background: #f8f9fa;
+  border: 2px solid #3498db;
+  border-radius: 8px;
+  padding: 10px 0;
+  outline: none;
+  transition: border 0.2s;
+}
+#custom-modal-empresa #codigo-empresa:focus {
+  border: 2px solid #2176ae;
+  background: #eaf6ff;
 } 

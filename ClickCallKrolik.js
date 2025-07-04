@@ -650,6 +650,208 @@ class ClickCallManager {
     if (existing) existing.remove();
   }
 
+  // Exibe erros de validação em um modal
+  showValidationErrors(erros) {
+    const oldModal = document.getElementById('custom-modal-validation');
+    if (oldModal) oldModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'custom-modal-validation';
+    modal.className = 'modal-confirm-bg';
+    
+    const errosHtml = erros.map(erro => `<div class="erro-linha">• ${erro}</div>`).join('');
+    
+    modal.innerHTML = `
+      <div class="modal-confirm" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
+        <div class="modal-confirm-msg">
+          <h3 style="color: #e74c3c; margin-bottom: 15px;">⚠️ Erros de Validação Encontrados</h3>
+          <p style="margin-bottom: 15px;">A planilha contém os seguintes erros que precisam ser corrigidos:</p>
+          <div class="erros-lista" style="background: #f8f9fa; padding: 15px; border-radius: 5px; border-left: 4px solid #e74c3c;">
+            ${errosHtml}
+          </div>
+          <p style="margin-top: 15px; font-size: 14px; color: #666;">
+            <strong>Campos obrigatórios:</strong> NOME/CONTATO, RAMAL (mínimo 7 dígitos), TELEFONE/NUMERO (mínimo 8 dígitos)<br>
+            <strong>CPF:</strong> Se fornecido, deve ter 11 dígitos e ser válido
+          </p>
+        </div>
+        <div class="modal-confirm-actions">
+          <button class="modal-btn-cancel">Entendi</button>
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    modal.querySelector('.modal-btn-cancel').onclick = () => {
+      modal.remove();
+    };
+  }
+
+  // Exibe modal para solicitar código da empresa
+  showEmpresaCodeModal(contatosValidos, ramais4Digitos) {
+    const oldModal = document.getElementById('custom-modal-empresa');
+    if (oldModal) oldModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'custom-modal-empresa';
+    modal.className = 'modal-confirm-bg';
+    
+    const ramaisHtml = ramais4Digitos.map(item => 
+      `<div class="ramal-item">• Linha ${item.linha}: ${item.contato} (Ramal: ${item.ramal})</div>`
+    ).join('');
+    
+    modal.innerHTML = `
+      <div class="modal-confirm" style="max-width: 500px;">
+        <div class="modal-confirm-msg">
+          <h3 style="color: #3498db; margin-bottom: 15px;">🏢 Código da Empresa Necessário</h3>
+          <p style="margin-bottom: 15px;">Foram encontrados ${ramais4Digitos.length} contato(s) com ramal de 4 dígitos que precisam do código da empresa:</p>
+          <div class="ramais-lista" style="background: #f8f9fa; padding: 15px; border-radius: 5px; border-left: 4px solid #3498db; max-height: 200px; overflow-y: auto; margin-bottom: 15px;">
+            ${ramaisHtml}
+          </div>
+          <p style="margin-bottom: 15px;">Digite o código da empresa (3 dígitos) que será adicionado antes dos ramais de 4 dígitos:</p>
+          <input type="text" id="codigo-empresa" placeholder="Ex: 123" maxlength="3" style="width: 50%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 20px; text-align: center; letter-spacing: 2px;" pattern="[0-9]{3}">
+          <p style="margin-top: 10px; font-size: 14px; color: #666;">
+            <strong>Exemplo:</strong> Se o código for "123" e o ramal for "1000", ficará "1231000"
+          </p>
+        </div>
+        <div class="modal-confirm-actions">
+          <button class="modal-btn-confirm" id="btn-confirmar-codigo">Confirmar</button>
+          <button class="modal-btn-cancel">Cancelar</button>
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    const inputCodigo = modal.querySelector('#codigo-empresa');
+    const btnConfirmar = modal.querySelector('#btn-confirmar-codigo');
+    const btnCancelar = modal.querySelector('.modal-btn-cancel');
+    
+    // Foca no input automaticamente
+    inputCodigo.focus();
+    
+    // Validação do input (apenas números)
+    inputCodigo.addEventListener('input', function() {
+      this.value = this.value.replace(/\D/g, '').slice(0, 3);
+    });
+    
+    // Confirma o código
+    btnConfirmar.onclick = () => {
+      const codigo = inputCodigo.value.trim();
+      if (codigo.length !== 3) {
+        this.showError('O código da empresa deve ter exatamente 3 dígitos.');
+        return;
+      }
+      // Processa os contatos com o código da empresa
+      const contatosProcessados = this.processarContatosComCodigo(contatosValidos, ramais4Digitos, codigo);
+      modal.remove();
+      // Se não houver contatos processados, mostra erro
+      if (!contatosProcessados || contatosProcessados.length === 0) {
+        this.showError('Nenhum contato válido após processar os ramais.');
+        return;
+      }
+      // Continua o fluxo normal de importação
+      this.showImportOptions(contatosProcessados);
+    };
+    
+    // Cancela
+    btnCancelar.onclick = () => {
+      modal.remove();
+    };
+    
+    // Enter para confirmar
+    inputCodigo.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        btnConfirmar.click();
+      }
+    });
+  }
+
+  // Processa os contatos adicionando o código da empresa aos ramais de 4 dígitos
+  processarContatosComCodigo(contatosValidos, ramais4Digitos, codigoEmpresa) {
+    console.log(`Processando contatos com código da empresa: ${codigoEmpresa}`);
+    
+    // Cria um mapa dos ramais de 4 dígitos para facilitar a busca
+    const mapaRamais4Digitos = new Map();
+    ramais4Digitos.forEach(item => {
+      mapaRamais4Digitos.set(item.linha, item.ramal);
+    });
+    
+    // Processa os dados originais novamente para incluir os ramais de 4 dígitos
+    const dadosOriginais = this.lastProcessedData;
+    const contatosProcessados = [];
+    
+    dadosOriginais.forEach((contact, index) => {
+      const linha = index + 2;
+      
+      // Função auxiliar para buscar valor em múltiplas chaves possíveis
+      const getValue = (keys) => {
+        for (let key of keys) {
+          if (contact[key] !== undefined && contact[key] !== null && contact[key] !== '') {
+            return contact[key];
+          }
+        }
+        return '';
+      };
+
+      const contato = getValue(['CONTATO', 'contato', 'Contato', 'NOME', 'Nome', 'nome']);
+      const ramal = getValue(['RAMAL', 'ramal', 'Ramal']);
+      const numero = getValue(['TELEFONE', 'telefone', 'Telefone', 'NUMERO', 'numero', 'Numero', 'FONE', 'fone', 'Fone']);
+      
+      if (!contato || !ramal || !numero) return;
+      
+      const ramalNumeros = ramal.toString().replace(/\D/g, '');
+      const numeroNumeros = numero.toString().replace(/\D/g, '');
+      
+      // Verifica se é um ramal de 4 dígitos
+      let ramalFinal = ramalNumeros;
+      if (ramalNumeros.length === 4) {
+        ramalFinal = codigoEmpresa + ramalNumeros;
+        console.log(`Ramal processado: ${ramalNumeros} → ${ramalFinal} (${contato})`);
+      }
+      
+      // Processamento do CPF
+      const cpfOriginal = getValue(['CPF', 'cpf']);
+      let cpfFormatado = '';
+      const cpfStr = (cpfOriginal !== undefined && cpfOriginal !== null) ? String(cpfOriginal) : '';
+      if (cpfStr) {
+        cpfFormatado = formatarCPF(cpfStr);
+        if (cpfStr.replace(/\D/g, '').length > 0) {
+          if (cpfStr.replace(/\D/g, '').length !== 11) {
+            console.log(`CPF inválido ignorado: ${cpfStr} (${contato})`);
+          } else if (!validarCPF(cpfStr)) {
+            console.log(`CPF inválido ignorado: ${cpfStr} (${contato})`);
+          } else if (cpfStr !== cpfFormatado) {
+            console.log(`CPF formatado: ${cpfStr} → ${cpfFormatado} (${contato})`);
+          }
+        }
+      }
+      
+      const normalized = {
+        contato: contato.toString().trim(),
+        cpf: cpfFormatado,
+        ramal: ramalFinal,
+        numero: numeroNumeros,
+        done: false,
+        observacao: getValue(['OBSERVAÇÃO', 'observacao', 'Observação', 'OBSERVACAO', 'OBS', 'obs', 'Obs'])
+      };
+
+      // Verifica se "JÁ LIGUEI" está marcado
+      const jaLiguei = getValue(['JÁ LIGUEI', 'já liguei', 'JÁ LIGUEI', 'done', 'Done', 'DONE']);
+      if (jaLiguei) {
+        normalized.done = jaLiguei.toString().toLowerCase() === 'sim' || 
+                         jaLiguei.toString().toLowerCase() === 'true' || 
+                         jaLiguei.toString().toLowerCase() === '1' ||
+                         jaLiguei === true;
+      }
+
+      contatosProcessados.push(normalized);
+    });
+    
+    console.log(`Total de contatos processados: ${contatosProcessados.length}`);
+    return contatosProcessados;
+  }
+
   // Exibe modal de confirmação customizada
   showConfirm(message, onConfirm) {
     const oldModal = document.getElementById('custom-modal-confirm');
@@ -689,13 +891,40 @@ class ClickCallManager {
     }
     try {
       this.showLoading('Processando arquivo...');
-      const contacts = await this.processFile(file);
+      console.log('Iniciando processamento do arquivo:', file.name);
+      const resultado = await this.processFile(file);
       this.hideLoading();
+      
+      // Verifica se o resultado contém ramais de 4 dígitos
+      if (resultado.ramais4Digitos && resultado.ramais4Digitos.length > 0) {
+        this.showEmpresaCodeModal(resultado.contatos, resultado.ramais4Digitos);
+        return;
+      }
+      
+      // Processamento normal
+      const contacts = resultado;
+      console.log('Contatos processados com sucesso:', contacts.length);
+      if (contacts.length === 0) {
+        this.showWarning('Nenhum contato válido encontrado no arquivo. Verifique se há colunas com NOME/CONTATO, RAMAL ou TELEFONE/NUMERO.');
+        return;
+      }
       this.showImportOptions(contacts);
     } catch (error) {
       console.error('Erro ao processar arquivo:', error);
-      this.showError('Erro ao processar o arquivo. Verifique se é um arquivo válido.');
       this.hideLoading();
+      
+      // Se é um erro de validação, mostra os erros específicos
+      if (error.message === 'Erros de validação encontrados') {
+        // Recupera os erros da função normalizeContacts
+        const resultado = this.normalizeContacts(this.lastProcessedData || []);
+        if (resultado.erros && resultado.erros.length > 0) {
+          this.showValidationErrors(resultado.erros);
+        } else {
+          this.showError('Erro ao processar o arquivo. Verifique se é um arquivo válido.');
+        }
+      } else {
+        this.showError(`Erro ao processar o arquivo: ${error.message}`);
+      }
     }
   }
 
@@ -720,13 +949,25 @@ class ClickCallManager {
           const sheetName = workbook.SheetNames[0];
           const sheet = workbook.Sheets[sheetName];
           const json = XLSX.utils.sheet_to_json(sheet);
+          console.log('Dados brutos do arquivo:', json);
           if (!json || json.length === 0) {
             reject(new Error('Arquivo vazio ou sem dados válidos'));
             return;
           }
-          const contacts = this.normalizeContacts(json);
-          resolve(contacts);
+          this.lastProcessedData = json; // Armazena para recuperar erros
+          const resultado = this.normalizeContacts(json);
+          console.log('Resultado da normalização:', resultado);
+          
+          if (resultado.erros && resultado.erros.length > 0) {
+            reject(new Error('Erros de validação encontrados'));
+          } else if (resultado.ramais4Digitos && resultado.ramais4Digitos.length > 0) {
+            // Há ramais de 4 dígitos, precisa solicitar código da empresa
+            resolve({ contatos: resultado.contatos, ramais4Digitos: resultado.ramais4Digitos });
+          } else {
+            resolve(resultado.contatos);
+          }
         } catch (error) {
+          console.error('Erro ao processar arquivo:', error);
           reject(error);
         }
       };
@@ -737,15 +978,128 @@ class ClickCallManager {
 
   // Normaliza os dados dos contatos importados
   normalizeContacts(contacts) {
-    // Mapeia apenas os campos exatos das colunas
-    return contacts.map((contact, index) => ({
-      CONTATO: contact["CONTATO"] || contact["contato"] || contact["Contato"] || contact["NOME"] || '',
-      CPF: contact["CPF"] || contact["cpf"] || '',
-      RAMAL: contact["RAMAL"] || contact["ramal"] || contact["Ramal"] || '',
-      TELEFONE: contact["TELEFONE"] || contact["telefone"] || contact["Telefone"] || contact["NUMERO"] || contact["numero"] || '',
-      "JÁ LIGUEI": (contact["JÁ LIGUEI"] || contact["já liguei"] || contact["done"] || '').toString().toLowerCase() === 'sim',
-      OBSERVAÇÃO: contact["OBSERVAÇÃO"] || contact["observacao"] || contact["Observação"] || contact["OBSERVACAO"] || '',
-    })).filter(contact => contact.CONTATO || contact.RAMAL || contact.TELEFONE);
+    const erros = [];
+    const contatosValidos = [];
+    const ramais4Digitos = [];
+    
+    // Mapeia os campos para o formato interno usado pelo sistema
+    contacts.forEach((contact, index) => {
+      const linha = index + 2; // +2 porque index começa em 0 e a primeira linha é o cabeçalho
+      
+      // Função auxiliar para buscar valor em múltiplas chaves possíveis
+      const getValue = (keys) => {
+        for (let key of keys) {
+          if (contact[key] !== undefined && contact[key] !== null && contact[key] !== '') {
+            return contact[key];
+          }
+        }
+        return '';
+      };
+
+      // Validação dos campos obrigatórios
+      const contato = getValue(['CONTATO', 'contato', 'Contato', 'NOME', 'Nome', 'nome']);
+      const ramal = getValue(['RAMAL', 'ramal', 'Ramal']);
+      const numero = getValue(['TELEFONE', 'telefone', 'Telefone', 'NUMERO', 'numero', 'Numero', 'FONE', 'fone', 'Fone']);
+      
+      // Verifica se todos os campos obrigatórios estão preenchidos
+      if (!contato || contato.toString().trim() === '') {
+        erros.push(`Linha ${linha}: Campo NOME/CONTATO está vazio ou não encontrado`);
+        return;
+      }
+      
+      if (!ramal || ramal.toString().trim() === '') {
+        erros.push(`Linha ${linha}: Campo RAMAL está vazio ou não encontrado`);
+        return;
+      }
+      
+      if (!numero || numero.toString().trim() === '') {
+        erros.push(`Linha ${linha}: Campo TELEFONE/NUMERO está vazio ou não encontrado`);
+        return;
+      }
+      
+      // Validação do formato do ramal
+      const ramalNumeros = ramal.toString().replace(/\D/g, '');
+      
+      // Verifica se é um ramal de 4 dígitos
+      if (ramalNumeros.length === 4) {
+        ramais4Digitos.push({
+          linha: linha,
+          contato: contato,
+          ramal: ramalNumeros
+        });
+        return; // Não adiciona à lista de válidos ainda, aguarda o código da empresa
+      }
+      
+      // Validação para ramais que não são de 4 dígitos
+      if (ramalNumeros.length < 7) {
+        erros.push(`Linha ${linha}: RAMAL deve ter pelo menos 7 dígitos (atual: ${ramalNumeros.length})`);
+        return;
+      }
+      
+      // Validação do formato do telefone (apenas números, mínimo 8 dígitos)
+      const numeroNumeros = numero.toString().replace(/\D/g, '');
+      if (numeroNumeros.length < 8) {
+        erros.push(`Linha ${linha}: TELEFONE deve ter pelo menos 8 dígitos (atual: ${numeroNumeros.length})`);
+        return;
+      }
+
+      // Processamento do CPF
+      const cpfOriginal = getValue(['CPF', 'cpf']);
+      let cpfFormatado = '';
+      
+      if (cpfOriginal) {
+        cpfFormatado = formatarCPF(cpfOriginal);
+        
+        // Validação do CPF se fornecido
+        if (cpfOriginal.replace(/\D/g, '').length > 0) {
+          if (cpfOriginal.replace(/\D/g, '').length !== 11) {
+            erros.push(`Linha ${linha}: CPF deve ter 11 dígitos (atual: ${cpfOriginal.replace(/\D/g, '').length})`);
+            return;
+          }
+          
+          if (!validarCPF(cpfOriginal)) {
+            erros.push(`Linha ${linha}: CPF inválido (${cpfOriginal})`);
+            return;
+          }
+          
+          if (cpfOriginal !== cpfFormatado) {
+            console.log(`CPF formatado para ${contato}: ${cpfOriginal} → ${cpfFormatado}`);
+          }
+        }
+      }
+      
+      const normalized = {
+        contato: contato.toString().trim(),
+        cpf: cpfFormatado,
+        ramal: ramalNumeros, // Salva apenas os números
+        numero: numeroNumeros, // Salva apenas os números
+        done: false,
+        observacao: getValue(['OBSERVAÇÃO', 'observacao', 'Observação', 'OBSERVACAO', 'OBS', 'obs', 'Obs'])
+      };
+
+      // Verifica se "JÁ LIGUEI" está marcado
+      const jaLiguei = getValue(['JÁ LIGUEI', 'já liguei', 'JÁ LIGUEI', 'done', 'Done', 'DONE']);
+      if (jaLiguei) {
+        normalized.done = jaLiguei.toString().toLowerCase() === 'sim' || 
+                         jaLiguei.toString().toLowerCase() === 'true' || 
+                         jaLiguei.toString().toLowerCase() === '1' ||
+                         jaLiguei === true;
+      }
+
+      contatosValidos.push(normalized);
+    });
+    
+    // Se há erros, retorna null e os erros
+    if (erros.length > 0) {
+      return { contatos: null, erros: erros, ramais4Digitos: [] };
+    }
+    
+    // Se há ramais de 4 dígitos, retorna para solicitar código da empresa
+    if (ramais4Digitos.length > 0) {
+      return { contatos: contatosValidos, erros: [], ramais4Digitos: ramais4Digitos };
+    }
+    
+    return { contatos: contatosValidos, erros: [], ramais4Digitos: [] };
   }
 
   // Exibe os contatos na tabela
@@ -788,6 +1142,11 @@ class ClickCallManager {
 
   // Exibe opções de importação ao importar contatos
   showImportOptions(importedContacts) {
+    // Verificação: se a lista importada for idêntica à atual, mostrar aviso e não prosseguir
+    if (this.isListaIgual(importedContacts, this.contacts)) {
+      this.showModalListaIgual();
+      return;
+    }
     const oldModal = document.getElementById('custom-modal-import');
     if (oldModal) oldModal.remove();
     const modal = document.createElement('div');
@@ -820,10 +1179,80 @@ class ClickCallManager {
     };
   }
 
+  // Compara se duas listas de contatos são idênticas
+  isListaIgual(listaA, listaB) {
+    if (!Array.isArray(listaA) || !Array.isArray(listaB)) return false;
+    if (listaA.length !== listaB.length) return false;
+    // Ordena para garantir comparação independente da ordem
+    const sortFn = (a, b) => {
+      if (a.contato !== b.contato) return a.contato.localeCompare(b.contato);
+      if (a.ramal !== b.ramal) return a.ramal.localeCompare(b.ramal);
+      if (a.numero !== b.numero) return a.numero.localeCompare(b.numero);
+      if ((a.cpf || '') !== (b.cpf || '')) return (a.cpf || '').localeCompare(b.cpf || '');
+      if ((a.observacao || '') !== (b.observacao || '')) return (a.observacao || '').localeCompare(b.observacao || '');
+      if ((a.done ? 1 : 0) !== (b.done ? 1 : 0)) return (a.done ? 1 : 0) - (b.done ? 1 : 0);
+      return 0;
+    };
+    const arrA = [...listaA].sort(sortFn);
+    const arrB = [...listaB].sort(sortFn);
+    for (let i = 0; i < arrA.length; i++) {
+      const a = arrA[i], b = arrB[i];
+      if (
+        a.contato !== b.contato ||
+        a.ramal !== b.ramal ||
+        a.numero !== b.numero ||
+        (a.cpf || '') !== (b.cpf || '') ||
+        (a.observacao || '') !== (b.observacao || '') ||
+        (a.done ? 1 : 0) !== (b.done ? 1 : 0)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Mostra modal de lista igual
+  showModalListaIgual() {
+    const oldModal = document.getElementById('custom-modal-lista-igual');
+    if (oldModal) oldModal.remove();
+    const modal = document.createElement('div');
+    modal.id = 'custom-modal-lista-igual';
+    modal.className = 'modal-confirm-bg';
+    modal.innerHTML = `
+      <div class="modal-confirm" style="max-width: 400px;">
+        <div class="modal-confirm-msg" style="text-align:center;">
+          <h3 style="color: #3498db; margin-bottom: 15px;">Planilha Idêntica</h3>
+          <p style="margin-bottom: 15px;">A planilha enviada é idêntica à lista atual de contatos.<br>Nenhuma alteração será feita.</p>
+        </div>
+        <div class="modal-confirm-actions">
+          <button class="modal-btn-cancel">OK</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modal.querySelector('.modal-btn-cancel').onclick = () => {
+      modal.remove();
+    };
+  }
+
   // Mescla contatos importados sem duplicar ramais
   mergeContacts(importedContacts) {
-    const ramaisExistentes = new Set(this.contacts.map(c => c.ramal));
-    const novos = importedContacts.filter(c => !ramaisExistentes.has(c.ramal));
+    console.log('Iniciando mesclagem de contatos...');
+    console.log('Contatos existentes:', this.contacts.length);
+    console.log('Contatos para importar:', importedContacts.length);
+    
+    const ramaisExistentes = new Set(this.contacts.map(c => c.ramal).filter(r => r));
+    console.log('Ramais existentes:', Array.from(ramaisExistentes));
+    
+    const novos = importedContacts.filter(c => {
+      const temRamal = c.ramal && c.ramal.toString().trim() !== '';
+      const ramalNovo = !ramaisExistentes.has(c.ramal);
+      console.log(`Contato ${c.contato}: ramal=${c.ramal}, temRamal=${temRamal}, ramalNovo=${ramalNovo}`);
+      return temRamal && ramalNovo;
+    });
+    
+    console.log('Novos contatos a serem adicionados:', novos.length);
+    
     this.contacts = [...this.contacts, ...novos];
     this.saveContactsToStorage();
     this.currentPage = 1;
@@ -833,11 +1262,15 @@ class ClickCallManager {
 
   // Substitui todos os contatos pelos importados
   replaceContacts(importedContacts) {
+    console.log('Substituindo todos os contatos...');
+    console.log('Contatos antigos:', this.contacts.length);
+    console.log('Novos contatos:', importedContacts.length);
+    
     this.contacts = importedContacts;
     this.saveContactsToStorage();
     this.currentPage = 1;
     this.applySortAndDisplay();
-    this.showSuccess('Contatos substituídos com sucesso!');
+    this.showSuccess(`${importedContacts.length} contatos substituídos com sucesso!`);
   }
 
   // Edição de contato
@@ -903,11 +1336,18 @@ class ClickCallManager {
 
 // Função utilitária para formatar CPF
 function formatarCPF(cpf) {
-  cpf = cpf.replace(/\D/g, '');
-  if (cpf.length > 11) cpf = cpf.slice(0, 11);
-  return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{0,2})/, function(_, a, b, c, d) {
-    return d ? `${a}.${b}.${c}-${d}` : c ? `${a}.${b}.${c}` : b ? `${a}.${b}` : a;
-  });
+  if (!cpf) return '';
+  
+  // Remove todos os caracteres não numéricos
+  cpf = cpf.toString().replace(/\D/g, '');
+  
+  // Se não tem 11 dígitos, retorna como está (pode ser um CPF incompleto)
+  if (cpf.length !== 11) {
+    return cpf;
+  }
+  
+  // Formata no padrão XXX.XXX.XXX-XX
+  return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
 }
 
 // Função utilitária para validar CPF
