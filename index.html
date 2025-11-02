@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Click To Call IPBX</title>
+  <link rel="stylesheet" href="ClickCallKrolik.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div class="banner-borda">
+   <h2>📞 Planilha de Contatos - Ligação em um toque</h2>
+  </div>
+  <label for="upload">Selecione um arquivo Excel ou CSV:</label>
+  <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+    <input type="file" id="upload" accept=".xlsx,.csv" title="Selecione um arquivo Excel ou CSV para carregar os contatos">
+    <button id="btn-howto-upload" class="btn-howto-upload" title="Como usar" style="background: linear-gradient(90deg, #7b0051 60%, #c8007e 100%); color: #fff; border: none; border-radius: 22px; padding: 10px 28px; font-size: 1.1rem; font-weight: 600; box-shadow: 0 2px 8px rgba(123,0,81,0.08); cursor: pointer; transition: background 0.2s;">Como Usar</button>
+    <button id="btn-faq-upload" class="btn-faq-upload" title="Dúvidas Frequentes" style="background: linear-gradient(90deg, #23233a 60%, #7b0051 100%); color: #fff; border: none; border-radius: 22px; padding: 10px 28px; font-size: 1.1rem; font-weight: 600; box-shadow: 0 2px 8px rgba(35,35,58,0.10); cursor: pointer; transition: background 0.2s;">Dúvidas Frequentes</button>
+  </div>
+  <table id="contactsTable">
+    <thead>
+      <tr>
+        <th>CONTATO</th>
+        <th>CPF / CNPJ</th>
+        <th>RAMAL</th>
+        <th>TELEFONE</th>
+        <th>JÁ LIGUEI</th>
+        <th>AÇÃO</th>
+        <th>OBSERVAÇÃO</th>
+        <th>GRAVAÇÃO</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script src="ClickCallKrolik.js"></script>
+  <script>
+    // Modal de ajuda para formato da planilha
+    document.addEventListener('DOMContentLoaded', function() {
+      // COMO USAR
+      const btnHowTo = document.getElementById('btn-howto-upload');
+      if (btnHowTo) {
+        btnHowTo.onclick = function() {
+          if (document.getElementById('modal-howto-upload')) return;
+          const modal = document.createElement('div');
+          modal.id = 'modal-howto-upload';
+          modal.className = 'modal-confirm-bg';
+          modal.style.display = 'flex';
+          modal.style.alignItems = 'center';
+          modal.style.justifyContent = 'center';
+          modal.style.zIndex = '9999';
+          modal.innerHTML = `
+            <div class=\"modal-confirm\" style=\"
+              width: 100%;
+              max-width: 1280px;
+              height: auto;
+              max-height: 720px;
+              min-width: 320px;
+              min-height: 320px;
+              box-sizing: border-box;
+              background: rgba(40,40,60,0.92);
+              backdrop-filter: blur(8px);
+              border-radius: 32px;
+              box-shadow: 0 12px 48px rgba(0,0,0,0.18);
+              padding: 48px 56px;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: flex-start;
+              overflow-y: auto;
+              margin: 32px 0;
+              position: relative;
+            \">
+              <div style=\"font-size: 2.2rem; font-weight: 700; margin-bottom: 24px; color: #fff; letter-spacing: 0.5px; text-align:center;\">Como deve ser a planilha?</div>
+              <div style=\"font-size: 1.25rem; color: #e0e0f0; line-height: 1.7; margin-bottom: 32px; max-width: 900px; text-align:left;\">
+                <ul style='padding-left: 24px; margin-bottom: 18px;'>
+                  <li style='margin-bottom: 12px;'>O arquivo deve ser <b>.xlsx</b> ou <b>.csv</b>.</li>
+                  <li style='margin-bottom: 12px;'>Colunas aceitas:<br>
+                    <ul style='margin-top:8px;margin-bottom:8px;'>
+                      <li><b>Contato</b> <span style='color:#c8007e;font-weight:600;' title='Obrigatório'>&#9733; obrigatório</span>: CONTATO, Contato, contato, NOME, Nome, nome, PESSOA, Pessoa, pessoa, CLIENTE, Cliente, cliente</li>
+                      <li><b>Ramal</b> <span style='color:#c8007e;font-weight:600;' title='Obrigatório'>&#9733; obrigatório</span>: RAMAL, Ramal, ramal</li>
+                      <li><b>Telefone</b> <span style='color:#c8007e;font-weight:600;' title='Obrigatório'>&#9733; obrigatório</span>: TELEFONE, Telefone, telefone, NUMERO, Numero, numero, FONE, Fone, fone</li>
+                      <li><b>CPF / CNPJ</b> <span style='color:#aaa;font-weight:500;' title='Opcional'>&#9734; opcional</span>: CPF, cpf, CNPJ, cnpj</li>
+                      <li><b>Já liguei</b> <span style='color:#aaa;font-weight:500;' title='Opcional'>&#9734; opcional</span>: JÁ LIGUEI, já liguei, done, Done, DONE</li>
+                      <li><b>Observação</b> <span style='color:#aaa;font-weight:500;' title='Opcional'>&#9734; opcional</span>: OBSERVAÇÃO, Observação, observacao, OBSERVACAO, OBS, Obs, obs</li>
+                    </ul>
+                  </li>
+                  <li style='margin-bottom: 12px;'>Os títulos das colunas podem estar em maiúsculo ou minúsculo.</li>
+                  <li style='margin-bottom: 12px;'>O formato recomendado é:<br>
+                    <span style='display:inline-block; background:#23233a; border-radius:10px; padding:10px 18px; margin-top:8px; font-family:monospace; font-size:1.1em; color:#c8007e;'>CONTATO | RAMAL | TELEFONE | CPF / CNPJ | OBSERVAÇÃO</span>
+                  </li>
+                  <li style='margin-bottom: 12px;'>Exemplo de linha:<br>
+                    <span style='display:inline-block; background:#23233a; border-radius:10px; padding:5px 14px; margin-top:8px; font-family:monospace; font-size:1.1em; color:#fff; white-space:pre;'>João Silva | 1234567 | (16) 98189-2476 | 123.456.789-00 | Cliente Krolik</span>
+                  </li>
+                </ul>
+              </div>
+              <div style=\"display: flex; gap: 16px; justify-content: center; margin-top: 18px;\">
+                <button id=\"download-template-btn\" style=\"
+                  width: 220px;
+                  font-size: 1.2rem;
+                  padding: 14px 28px;
+                  border-radius: 12px;
+                  background: linear-gradient(90deg, #2176ae 60%, #3498db 100%);
+                  color: #fff;
+                  font-weight: 600;
+                  border: none;
+                  box-shadow: 0 2px 8px rgba(33,118,174,0.15);
+                  cursor: pointer;
+                  transition: background 0.2s;
+                \">📥 Baixar Tabela Padrão</button>
+                <button id=\"close-modal-howto-upload\" class=\"modal-btn-confirm\" style=\"
+                  width: 220px;
+                  font-size: 1.2rem;
+                  padding: 14px 28px;
+                  border-radius: 12px;
+                  background: linear-gradient(90deg, #7b0051 60%, #c8007e 100%);
+                  color: #fff;
+                  font-weight: 600;
+                  border: none;
+                  box-shadow: 0 2px 8px rgba(123,0,81,0.08);
+                  cursor: pointer;
+                  transition: background 0.2s;
+                \">Entendi</button>
+              </div>
+              <button id=\"close-modal-x-howto\" style=\"position:absolute;top:24px;right:32px;background:transparent;border:none;font-size:2rem;color:#fff;cursor:pointer;\">&times;</button>
+            </div>
+          `;
+          document.body.appendChild(modal);
+          document.getElementById('download-template-btn').onclick = function() {
+            // Chama a função de exportar template do ClickCallManager
+            if (window.clickCallManager && window.clickCallManager.exportTemplate) {
+              window.clickCallManager.exportTemplate();
+            } else {
+              // Fallback se o manager não estiver disponível
+              alert('Erro: Sistema não inicializado. Recarregue a página.');
+            }
+          };
+          document.getElementById('close-modal-howto-upload').onclick = function() {
+            modal.remove();
+          };
+          document.getElementById('close-modal-x-howto').onclick = function() {
+            modal.remove();
+          };
+          modal.onclick = function(e) {
+            if (e.target === modal) modal.remove();
+          };
+          // Responsividade
+          function resizeModal() {
+            const modalBox = modal.querySelector('.modal-confirm');
+            if (!modalBox) return;
+            const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
+            const vh = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
+            modalBox.style.maxWidth = Math.min(1280, vw * 0.95) + 'px';
+            modalBox.style.maxHeight = Math.min(720, vh * 0.9) + 'px';
+          }
+          resizeModal();
+          window.addEventListener('resize', resizeModal);
+          modal.onremove = function() {
+            window.removeEventListener('resize', resizeModal);
+          };
+        };
+      }
+      // FAQ
+      const btnFaq = document.getElementById('btn-faq-upload');
+      if (btnFaq) {
+        btnFaq.onclick = function() {
+          if (document.getElementById('modal-faq-upload')) return;
+          const modal = document.createElement('div');
+          modal.id = 'modal-faq-upload';
+          modal.className = 'modal-confirm-bg';
+          modal.style.display = 'flex';
+          modal.style.alignItems = 'center';
+          modal.style.justifyContent = 'center';
+          modal.style.zIndex = '9999';
+          modal.innerHTML = `
+            <div class=\"modal-confirm\" style=\"
+              width: 100%;
+              max-width: 1280px;
+              height: auto;
+              max-height: 720px;
+              min-width: 320px;
+              min-height: 320px;
+              box-sizing: border-box;
+              background: rgba(40,40,60,0.92);
+              backdrop-filter: blur(8px);
+              border-radius: 32px;
+              box-shadow: 0 12px 48px rgba(0,0,0,0.18);
+              padding: 48px 56px;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: flex-start;
+              overflow-y: auto;
+              margin: 32px 0;
+              position: relative;
+            \">
+              <div style=\"font-size: 2.2rem; font-weight: 700; margin-bottom: 24px; color: #fff; letter-spacing: 0.5px; text-align:center;\">Dúvidas Frequentes</div>
+              <div style=\"font-size: 1.25rem; color: #e0e0f0; line-height: 1.7; margin-bottom: 32px; max-width: 900px; text-align:left;\">
+                <ul style='padding-left: 24px; margin-bottom: 18px;'>
+                  <li style='margin-bottom: 18px;'><b style='color:#c8007e;'>O que acontece se eu não preencher uma coluna obrigatória?</b><br><span style='color:#fff;'>O contato não será importado se faltar Contato, Ramal ou Telefone.</span></li>
+                  <li style='margin-bottom: 18px;'><b style='color:#c8007e;'>Posso usar planilhas do Google Sheets?</b><br><span style='color:#fff;'>Sim, basta exportar como .xlsx ou .csv.</span></li>
+                  <li style='margin-bottom: 18px;'><b style='color:#c8007e;'>Como corrigir erros de importação?</b><br><span style='color:#fff;'>Verifique se os títulos das colunas estão corretos e se não há linhas em branco.</span></li>
+                  <li style='margin-bottom: 18px;'><b style='color:#c8007e;'>O que fazer se aparecer erro de arquivo inválido?</b><br><span style='color:#fff;'>Certifique-se de que o arquivo está no formato .xlsx ou .csv e que não está protegido por senha.</span></li>
+                  <li style='margin-bottom: 18px;'><b style='color:#c8007e;'>Posso importar observações longas?</b><br><span style='color:#fff;'>Sim, mas recomenda-se textos curtos para melhor visualização.</span></li>
+                  <li style='margin-bottom: 18px;'><b style='color:#c8007e;'>O que acontece com contatos já existentes?</b><br><span style='color:#fff;'>Dependendo da opção escolhida, eles podem ser mesclados ou substituídos.</span></li>
+                </ul>
+              </div>
+              <button id=\"close-modal-faq-upload\" class=\"modal-btn-confirm\" style=\"
+                width: 220px;
+                margin-top: 18px;
+                font-size: 1.2rem;
+                padding: 14px 0;
+                border-radius: 12px;
+                background: linear-gradient(90deg, #23233a 60%, #7b0051 100%);
+                color: #fff;
+                font-weight: 600;
+                border: none;
+                box-shadow: 0 2px 8px rgba(35,35,58,0.10);
+                cursor: pointer;
+                transition: background 0.2s;
+              \">Entendi</button>
+              <button id=\"close-modal-x-faq\" style=\"position:absolute;top:24px;right:32px;background:transparent;border:none;font-size:2rem;color:#fff;cursor:pointer;\">&times;</button>
+            </div>
+          `;
+          document.body.appendChild(modal);
+          document.getElementById('close-modal-faq-upload').onclick = function() {
+            modal.remove();
+          };
+          document.getElementById('close-modal-x-faq').onclick = function() {
+            modal.remove();
+          };
+          modal.onclick = function(e) {
+            if (e.target === modal) modal.remove();
+          };
+          // Responsividade
+          function resizeModal() {
+            const modalBox = modal.querySelector('.modal-confirm');
+            if (!modalBox) return;
+            const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
+            const vh = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
+            modalBox.style.maxWidth = Math.min(1280, vw * 0.95) + 'px';
+            modalBox.style.maxHeight = Math.min(720, vh * 0.9) + 'px';
+          }
+          resizeModal();
+          window.addEventListener('resize', resizeModal);
+          modal.onremove = function() {
+            window.removeEventListener('resize', resizeModal);
+          };
+        };
+      }
+    });
+  </script>
+</body>
+</html> 
