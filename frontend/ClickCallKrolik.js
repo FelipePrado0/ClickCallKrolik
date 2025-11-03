@@ -1079,13 +1079,40 @@ class ClickCallManager {
           urlGravacao = `https://delorean.krolik.com.br/services/record/${gravacao.codigo}`;
         }
         
-        // Converter URL para novo formato APENAS na exibição
-        // De: https://delorean.krolik.com.br/services/record/CODIGO
-        // Para: https://delorean.krolik.com.br/records/CODIGO.wav
-        if (urlGravacao && gravacao.codigo) {
-          urlGravacao = `https://delorean.krolik.com.br/records/${gravacao.codigo}.wav`;
-        }
+        // Detectar formato baseado na data da gravação
+        // Se for de hoje: .wav, se for passado: .mp3 (após conversão automática à meia-noite)
+        let urlGravacaoWav = '';
+        let urlGravacaoMp3 = '';
+        let ehGravacaoDeHoje = false;
         
+        if (urlGravacao && gravacao.codigo) {
+          // Tentar detectar se é de hoje baseado no calldate
+          try {
+            if (gravacao.calldate) {
+              // Parse da data da gravação
+              const calldateStr = gravacao.calldate.replace(/\+/g, ' ').replace(/%3A/g, ':');
+              const dataGravacao = new Date(calldateStr);
+              const hoje = new Date();
+              
+              // Comparar apenas data (sem hora) - verifica se é o mesmo dia
+              const dataGravacaoSemHora = new Date(dataGravacao.getFullYear(), dataGravacao.getMonth(), dataGravacao.getDate());
+              const hojeSemHora = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+              
+              ehGravacaoDeHoje = dataGravacaoSemHora.getTime() === hojeSemHora.getTime();
+            }
+          } catch (e) {
+            // Se houver erro ao parsear data, assume que não é de hoje (mais seguro)
+            console.warn('[displayGravacoes] Erro ao parsear data da gravação:', e);
+            ehGravacaoDeHoje = false;
+          }
+          
+          // Montar URLs para ambos formatos
+          urlGravacaoWav = `https://delorean.krolik.com.br/records/${gravacao.codigo}.wav`;
+          urlGravacaoMp3 = `https://delorean.krolik.com.br/records/${gravacao.codigo}.mp3`;
+          
+          // URL principal será a mais provável baseado na data
+          urlGravacao = ehGravacaoDeHoje ? urlGravacaoWav : urlGravacaoMp3;
+        }
         
         // Não usar escapeHtml na URL - pode quebrar caracteres especiais
         // Usar encodeURI apenas para componentes da URL se necessário
@@ -1126,7 +1153,19 @@ class ClickCallManager {
                        data-codigo="${gravacao.codigo || ''}"
                        preload="metadata"
                        style="display: none;">
-                  <source src="${urlGravacaoFinal}" type="audio/wav">
+                  ${urlGravacaoWav && urlGravacaoMp3 ? `
+                    <!-- Múltiplos sources: o HTML5 audio tenta automaticamente o próximo se o primeiro falhar -->
+                    <!-- Prioriza o formato mais provável baseado na data, mas tenta ambos -->
+                    ${ehGravacaoDeHoje ? `
+                      <source src="${urlGravacaoWav}" type="audio/wav">
+                      <source src="${urlGravacaoMp3}" type="audio/mpeg">
+                    ` : `
+                      <source src="${urlGravacaoMp3}" type="audio/mpeg">
+                      <source src="${urlGravacaoWav}" type="audio/wav">
+                    `}
+                  ` : `
+                    <source src="${urlGravacaoFinal}" type="${ehGravacaoDeHoje ? 'audio/wav' : 'audio/mpeg'}">
+                  `}
                 </audio>
                 
                 <!-- Controles do Player -->
