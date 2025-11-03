@@ -95,7 +95,12 @@ playwright-report/
 # ==========================================
 # Data e Arquivos Sensíveis
 # ==========================================
+# Ignora todos JSONs na pasta Data, mas permite arquivos .example
 Data/*.json
+!Data/*.example.json
+# Proteção específica adicional para company_tokens.json
+Data/company_tokens.json
+
 Data/*.db
 Data/*.sqlite
 Data/*.sqlite3

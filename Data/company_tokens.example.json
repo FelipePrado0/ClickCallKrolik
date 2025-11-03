@@ -1,0 +1,9 @@
+[
+    {
+      "cod": "Codigo da empresa",
+      "nome": "Nome da Empresa",
+      "token_openai": "seu-token-openai-aqui",
+      "token_gemini": "seu-token-gemini-aqui",
+      "prefered_token": "openai"
+    }
+  ]
