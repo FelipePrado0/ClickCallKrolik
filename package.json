@@ -2,10 +2,10 @@
   "name": "clicktocall-webhook-server",
   "version": "1.0.0",
   "description": "Backend básico para receber webhooks do Delorean e repassar para o frontend",
-  "main": "webhook-server.js",
+  "main": "backend/webhook-server.js",
   "scripts": {
-    "start": "node webhook-server.js",
-    "dev": "node webhook-server.js"
+    "start": "node backend/webhook-server.js",
+    "dev": "node backend/webhook-server.js"
   },
   "keywords": [
     "webhook",

@@ -20,7 +20,7 @@ class ClickCallManager {
     this._lastImportFileName = null;
     
     // Configuração do servidor de webhook (backend local)
-    this.webhookServerUrl = 'http://localhost:3001'; // Backend local onde o webhook-server.js está rodando
+    this.webhookServerUrl = 'http://localhost:4201'; // Backend local onde o webhook-server.js está rodando
     this.webhookPollingInterval = 5000; // 5 segundos (ajustável)
     this.webhookPollingIntervalId = null;
     this._webhookConnectionErrorLogged = false;
@@ -1638,7 +1638,7 @@ class ClickCallManager {
     }
     
     // URL do backend (ajuste conforme necessário)
-    const webhookServerUrl = this.webhookServerUrl || 'http://localhost:3000';
+    const webhookServerUrl = this.webhookServerUrl || 'http://localhost:4201';
     const pollingInterval = this.webhookPollingInterval || 5000; // 5 segundos por padrão
     
     

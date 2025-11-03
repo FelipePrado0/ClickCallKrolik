@@ -15,11 +15,12 @@ require('dotenv').config(); // Carrega variáveis do .env
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
+const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4201;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5500';
-const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n-k-production.up.railway.app/webhook/d7070f2c-fffd-4ba1-b567-a10a1c9661d9';
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n-production-44e4.up.railway.app/webhook/6183dae4-72ae-4054-a430-451cae84d355';
 
 // Configurações de segurança e validação
 const WHITELIST_IPS = (process.env.WHITELIST_IPS || '').split(',').filter(ip => ip.trim());
@@ -65,6 +66,15 @@ app.use(express.urlencoded({
 app.use(express.json({ 
   limit: MAX_BODY_SIZE 
 }));
+
+// Servir arquivos estáticos do frontend
+const frontendPath = path.join(__dirname, '..', 'frontend');
+app.use(express.static(frontendPath));
+
+// Rota para servir o index.html na raiz
+app.get('/', (req, res) => {
+  res.sendFile(path.join(frontendPath, 'index.html'));
+});
 
 /**
  * Rate Limiting - Limita requisições por IP
@@ -818,7 +828,7 @@ app.listen(PORT, () => {
   console.log('═══════════════════════════════════════════════════');
   console.log('');
   console.log('⚙️  CONFIGURAÇÃO DO DELOREAN:');
-  console.log(`   Configure o webhook URL para: https://n8n-k-production.up.railway.app/webhook/d7070f2c-fffd-4ba1-b567-a10a1c9661d9`);
+  console.log(`   Configure o webhook URL para: https://n8n-production-44e4.up.railway.app/webhook/6183dae4-72ae-4054-a430-451cae84d355`);
   console.log('   Método: POST');
   console.log('   Content-Type: application/x-www-form-urlencoded');
   console.log('');

@@ -1,0 +1,31 @@
+services:
+  webhook-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: clickcall-webhook-server
+    ports:
+      - "4201:4201"
+    environment:
+      - PORT=4201
+      - FRONTEND_URL=http://localhost:4201
+      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL:-https://n8n-production-44e4.up.railway.app/webhook/6183dae4-72ae-4054-a430-451cae84d355}
+      - WHITELIST_IPS=${WHITELIST_IPS:-}
+      - MAX_BODY_SIZE=${MAX_BODY_SIZE:-100000}
+      - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60000}
+      - RATE_LIMIT_MAX_REQUESTS=${RATE_LIMIT_MAX_REQUESTS:-100}
+      - N8N_RETRY_MAX_ATTEMPTS=${N8N_RETRY_MAX_ATTEMPTS:-3}
+      - N8N_RETRY_BACKOFF_BASE=${N8N_RETRY_BACKOFF_BASE:-1000}
+      - MAX_AUDIT_EVENTS=${MAX_AUDIT_EVENTS:-100}
+    env_file:
+      - .env
+    volumes:
+      - ./Data:/app/Data
+    restart: unless-stopped
+    networks:
+      - clickcall-network
+
+networks:
+  clickcall-network:
+    driver: bridge
+
