@@ -56,7 +56,7 @@ Implementar sistema completo de transcrição de áudio que:
 
 **Verificar instalação:**
 ```bash
-npm install  # Executar para garantir que estão instaladas no node_modules
+npm install  # Executar para garantir que estão instaladas no node_modulesasdasdasdcxzxc
 ```
 
 **Nota:** `form-data` é opcional (apenas para fallback se SDK OpenAI não aceitar Buffer diretamente).
