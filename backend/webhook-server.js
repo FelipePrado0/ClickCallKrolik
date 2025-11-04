@@ -19,7 +19,7 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 4201;
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5500';
+const FRONTEND_URL = process.env.FRONTEND_URL || `http://localhost:${PORT}`;
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n-production-44e4.up.railway.app/webhook/6183dae4-72ae-4054-a430-451cae84d355';
 
 // Configurações de segurança e validação
@@ -54,7 +54,32 @@ app.use(cors({
   credentials: true
 }));
 
-// Middleware para limitar tamanho do body
+// Servir arquivos estáticos do frontend (DEVE VIR ANTES dos parsers de body)
+const frontendPath = path.join(__dirname, '..', 'frontend');
+console.log(`[INFO] Frontend path: ${frontendPath}`);
+app.use(express.static(frontendPath, {
+  index: false, // Não usar index automático, vamos usar rota específica
+  setHeaders: (res, path) => {
+    // Adicionar headers para arquivos estáticos
+    if (path.endsWith('.html')) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    }
+  }
+}));
+
+// Rota para servir o index.html na raiz
+app.get('/', (req, res) => {
+  const indexPath = path.join(frontendPath, 'index.html');
+  console.log(`[INFO] Servindo index.html de: ${indexPath}`);
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      console.error(`[ERROR] Erro ao servir index.html:`, err);
+      res.status(500).send('Erro ao carregar página inicial');
+    }
+  });
+});
+
+// Middleware para limitar tamanho do body (DEPOIS dos arquivos estáticos)
 app.use(express.text({ 
   type: '*/*',
   limit: MAX_BODY_SIZE 
@@ -66,15 +91,6 @@ app.use(express.urlencoded({
 app.use(express.json({ 
   limit: MAX_BODY_SIZE 
 }));
-
-// Servir arquivos estáticos do frontend
-const frontendPath = path.join(__dirname, '..', 'frontend');
-app.use(express.static(frontendPath));
-
-// Rota para servir o index.html na raiz
-app.get('/', (req, res) => {
-  res.sendFile(path.join(frontendPath, 'index.html'));
-});
 
 /**
  * Rate Limiting - Limita requisições por IP
