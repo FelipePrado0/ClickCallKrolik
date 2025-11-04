@@ -235,7 +235,7 @@ async function baixarAudio(url, timeout = 30000) {
 ```javascript
 /**
  * Busca tokens de API de uma empresa
- * @param {string} companyCode - Código da empresa
+ * @param {string} companyCode - Código da empresaa
  * @returns {Object} Objeto com empresa, provider e token
  */
 function buscarTokensEmpresa(companyCode) {
