@@ -41,21 +41,12 @@ async function transcreverComGemini(audioBuffer, token, mimeType = 'audio/wav', 
     throw new Error('Buffer de áudio vazio ou inválido');
   }
   
-  const audioSizeKB = (audioBuffer.length / 1024).toFixed(2);
-  const audioSizeMB = (audioBuffer.length / (1024 * 1024)).toFixed(2);
-  console.log(`[transcreverComGemini] Áudio recebido: ${audioSizeKB} KB (${audioSizeMB} MB), MIME type original: ${mimeType}`);
-  
   if (audioBuffer.length > 20 * 1024 * 1024) {
-    console.warn(`[transcreverComGemini] AVISO: Áudio muito grande (${audioSizeMB} MB), pode causar problemas na transcrição`);
+    console.warn(`[transcreverComGemini] AVISO: Áudio muito grande (${(audioBuffer.length / (1024 * 1024)).toFixed(2)} MB), pode causar problemas na transcrição`);
   }
   
   const base64Audio = audioBuffer.toString('base64');
-  const base64SizeKB = (base64Audio.length / 1024).toFixed(2);
-  console.log(`[transcreverComGemini] Base64 criado: ${base64SizeKB} KB`);
-  
   const geminiMimeType = detectarMimeTypeGemini(audioUrl, mimeType);
-  console.log(`[transcreverComGemini] Enviando para Gemini - MIME type: ${geminiMimeType}, URL: ${audioUrl || 'não fornecida'}`);
-  
   const prompt = "Transcreva este áudio de ligação telefônica palavra por palavra, exatamente como foi falado. Mantenha a transcrição fiel ao conteúdo original, incluindo pausas, hesitações e todas as palavras pronunciadas. Não adicione informações que não estão no áudio. Retorne apenas o texto transcrito.";
   
   let ultimoErro = null;
@@ -65,8 +56,6 @@ async function transcreverComGemini(audioBuffer, token, mimeType = 'audio/wav', 
   for (const modeloNome of modelos) {
     try {
       const model = genAI.getGenerativeModel({ model: modeloNome });
-      
-      console.log(`[transcreverComGemini] Tentando modelo: ${modeloNome}`);
       
       const result = await model.generateContent([
         prompt,
@@ -83,44 +72,22 @@ async function transcreverComGemini(audioBuffer, token, mimeType = 'audio/wav', 
       let texto = '';
       try {
         texto = response.text();
-        console.log(`[transcreverComGemini] 📝 Resposta completa do Gemini (modelo: ${modeloNome}):`, {
-          tamanhoTexto: texto ? texto.length : 0,
-          textoPreview: texto ? texto.substring(0, 200) : 'N/A',
-          textoCompleto: texto || 'VAZIO'
-        });
       } catch (textError) {
-        console.error(`[transcreverComGemini] ❌ Erro ao ler texto:`, textError);
+        console.error(`[transcreverComGemini] Erro ao ler texto:`, textError);
         const candidates = response.candidates || [];
         if (candidates && candidates.length > 0) {
           const content = candidates[0].content;
           if (content && content.parts) {
             texto = content.parts.map(part => part.text || '').join('');
-            console.log(`[transcreverComGemini] 📝 Texto extraído de candidates:`, {
-              tamanhoTexto: texto ? texto.length : 0,
-              textoPreview: texto ? texto.substring(0, 200) : 'N/A'
-            });
           }
         }
       }
       
       if (!texto || texto.length === 0) {
-        console.error(`[transcreverComGemini] ❌ Resposta vazia do Gemini. Response:`, {
-          responseKeys: Object.keys(response),
-          candidates: response.candidates || [],
-          textMethod: typeof response.text
-        });
         throw new Error('Resposta do Gemini está vazia');
       }
       
       const textoLimpo = texto.trim();
-      
-      console.log(`[transcreverComGemini] ✅ Texto processado:`, {
-        tamanhoOriginal: texto.length,
-        tamanhoLimpo: textoLimpo.length,
-        modelo: modeloNome,
-        primeiros100chars: textoLimpo.substring(0, 100)
-      });
-      
       modeloUsado = modeloNome;
       
       return {

@@ -405,10 +405,6 @@ class ClickCallManager {
     if (data) {
       try {
         this.transcriptions = JSON.parse(data);
-        console.log('[loadTranscriptionsFromStorage] ✅ Transcrições carregadas:', {
-          quantidade: Object.keys(this.transcriptions).length,
-          codigos: Object.keys(this.transcriptions)
-        });
       } catch (e) {
         console.error('[loadTranscriptionsFromStorage] ERRO ao carregar transcrições:', e);
         this.transcriptions = {};
@@ -419,9 +415,6 @@ class ClickCallManager {
   saveTranscriptionsToStorage() {
     try {
       localStorage.setItem(this.localStorageTranscriptionsKey, JSON.stringify(this.transcriptions));
-      console.log('[saveTranscriptionsToStorage] ✅ Transcrições salvas:', {
-        quantidade: Object.keys(this.transcriptions).length
-      });
     } catch (e) {
       console.error('[saveTranscriptionsToStorage] ERRO ao salvar transcrições:', e);
     }
@@ -808,15 +801,6 @@ class ClickCallManager {
     let codigo = gravacao.codigo || '';
     const companyCode = gravacao.company_id;
     
-    console.log('[transcreverAudio] 🎬 Iniciando transcrição:', {
-      codigoInicial: codigo,
-      companyCode: companyCode,
-      gravacaoKeys: Object.keys(gravacao),
-      index: index,
-      transcricaoExistente: !!this.transcriptions[codigo],
-      transcrevendo: !!this.transcribing[codigo]
-    });
-    
     if (!companyCode) {
       console.error('[transcreverAudio] ERRO: company_id não disponível na gravação');
       alert('❌ Código da empresa não disponível. Não é possível transcrever.');
@@ -824,17 +808,10 @@ class ClickCallManager {
     }
 
     if (this.transcribing[codigo]) {
-      console.log('[transcreverAudio] ⏳ Já está transcrevendo esta gravação:', codigo);
       return;
     }
 
     if (this.transcriptions[codigo]) {
-      console.log('[transcreverAudio] ✅ Transcrição já existe, exibindo...', {
-        codigo: codigo,
-        index: index,
-        tamanhoTexto: this.transcriptions[codigo].texto.length,
-        textoPreview: this.transcriptions[codigo].texto.substring(0, 100)
-      });
       this.exibirTranscricao(codigo, index);
       return;
     }
@@ -921,17 +898,6 @@ class ClickCallManager {
 
       if (data.success && data.transcription) {
 
-        console.log('[transcreverAudio] 📥 Resposta do backend:', {
-          success: data.success,
-          transcriptionLength: data.transcription ? data.transcription.length : 0,
-          transcriptionPreview: data.transcription ? data.transcription.substring(0, 100) : 'N/A',
-          provider: data.provider,
-          model: data.model,
-          duration: data.duration,
-          codigo: codigo,
-          index: index
-        });
-
         this.transcriptions[codigo] = {
           texto: data.transcription || '',
           provider: data.provider || 'unknown',
@@ -942,24 +908,7 @@ class ClickCallManager {
         };
 
         this.saveTranscriptionsToStorage();
-
-        console.log('[transcreverAudio] 💾 Transcrição salva:', {
-          codigo: codigo,
-          tamanhoTexto: this.transcriptions[codigo].texto.length,
-          textoPreview: this.transcriptions[codigo].texto.substring(0, 100),
-          provider: this.transcriptions[codigo].provider,
-          model: this.transcriptions[codigo].model,
-          duration: this.transcriptions[codigo].duration,
-          keysDisponiveis: Object.keys(this.transcriptions)
-        });
-
         this.exibirTranscricao(codigo, index);
-
-        console.log('[transcreverAudio] ✅ Transcrição concluída', {
-          provider: data.provider,
-          duration: data.duration,
-          tamanho: data.transcription.length
-        });
       } else {
         throw new Error(data.message || 'Erro desconhecido na transcrição');
       }
@@ -982,13 +931,6 @@ class ClickCallManager {
     const companyId = buttonElement.getAttribute('data-company-id');
     const calldate = buttonElement.getAttribute('data-calldate') || '';
     
-    console.log('[transcreverAudioPorButton] 📋 Dados do botão:', {
-      codigo: codigo,
-      index: index,
-      companyId: companyId,
-      calldate: calldate
-    });
-    
     if (!companyId) {
       console.error('[transcreverAudioPorButton] ERRO: company_id não disponível');
       alert('❌ Código da empresa não disponível. Não é possível transcrever.');
@@ -996,7 +938,6 @@ class ClickCallManager {
     }
 
     if (!codigo) {
-      console.error('[transcreverAudioPorButton] ERRO: Código da gravação não encontrado');
       alert('❌ Código da gravação não encontrado');
       return;
     }
@@ -1007,12 +948,6 @@ class ClickCallManager {
       calldate: calldate,
       url: ''
     };
-
-    console.log('[transcreverAudioPorButton] 🎯 Chamando transcreverAudio:', {
-      gravacao: gravacao,
-      index: index,
-      transcricaoExistente: !!this.transcriptions[codigo]
-    });
 
     this.transcreverAudio(gravacao, index);
   }
@@ -1037,36 +972,20 @@ class ClickCallManager {
   }
 
   exibirTranscricao(codigo, index) {
-    console.log('[exibirTranscricao] 🔍 Buscando transcrição:', {
-      codigo: codigo,
-      index: index,
-      keysDisponiveis: Object.keys(this.transcriptions),
-      transcricaoExiste: !!this.transcriptions[codigo]
-    });
-
     const transcricao = this.transcriptions[codigo];
     if (!transcricao) {
-      console.error('[exibirTranscricao] ❌ Transcrição não encontrada para código:', codigo);
-      console.error('[exibirTranscricao] Chaves disponíveis:', Object.keys(this.transcriptions));
+      console.error('[exibirTranscricao] Transcrição não encontrada para código:', codigo);
       return;
     }
 
     if (!transcricao.texto) {
-      console.error('[exibirTranscricao] ❌ Texto da transcrição vazio para código:', codigo);
-      console.error('[exibirTranscricao] Transcrição completa:', transcricao);
+      console.error('[exibirTranscricao] Texto da transcrição vazio para código:', codigo);
       return;
     }
 
-    console.log('[exibirTranscricao] ✅ Exibindo transcrição:', {
-      codigo: codigo,
-      index: index,
-      tamanhoTexto: transcricao.texto.length,
-      textoPreview: transcricao.texto.substring(0, 100)
-    });
-
     const transcricaoElement = document.getElementById(`transcricao-${index}`);
     if (!transcricaoElement) {
-      console.error('[exibirTranscricao] ❌ Elemento de transcrição não encontrado para índice:', index);
+      console.error('[exibirTranscricao] Elemento de transcrição não encontrado para índice:', index);
       return;
     }
     
@@ -1663,16 +1582,6 @@ class ClickCallManager {
             ">
               ${this.transcriptions[gravacao.codigo] ? `
                 <!-- Transcrição existente -->
-                ${(() => {
-                  const transcricaoAtual = this.transcriptions[gravacao.codigo];
-                  console.log('[showRecordingModal] 📋 Exibindo transcrição existente:', {
-                    codigo: gravacao.codigo,
-                    index: index,
-                    tamanhoTexto: transcricaoAtual ? transcricaoAtual.texto.length : 0,
-                    textoPreview: transcricaoAtual ? transcricaoAtual.texto.substring(0, 100) : 'N/A'
-                  });
-                  return '';
-                })()}
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                   <div style="color: #c8007e; font-size: 0.9rem; font-weight: 600;">
                     📝 Transcrição (${this.transcriptions[gravacao.codigo].provider === 'openai' ? 'OpenAI' : 'Gemini'})

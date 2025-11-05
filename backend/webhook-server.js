@@ -537,15 +537,6 @@ app.post('/api/transcribe', async (req, res) => {
     // Chamar serviço de transcrição
     const resultado = await transcreverAudio(audioUrl, codigo, companyCode, calldate, logCallback);
 
-    console.log(`[webhook-server] 📤 Enviando resposta para frontend:`, {
-      success: resultado.success,
-      transcriptionLength: resultado.transcription ? resultado.transcription.length : 0,
-      transcriptionPreview: resultado.transcription ? resultado.transcription.substring(0, 200) : 'N/A',
-      provider: resultado.provider,
-      model: resultado.model
-    });
-
-    // Adicionar requestId ao resultado
     resultado.requestId = requestId;
 
     res.json(resultado);

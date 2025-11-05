@@ -221,17 +221,9 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
       urlAudioReal = urlFormatada;
       tentativas++;
       
-      console.log(`[transcription-service] ✅ Áudio baixado como ${formato.toUpperCase()}:`, {
-        url: urlFormatada,
-        tamanho: audioBuffer.length,
-        tamanhoKB: (audioBuffer.length / 1024).toFixed(2),
-        mimeType: mimeType
-      });
-      
       break;
     } catch (error) {
       log('warn', `Falha ao baixar ${formato}`, { error: error.message });
-      console.warn(`[transcription-service] ⚠️ Falha ao baixar ${formato.toUpperCase()}:`, error.message);
       if (tentativas === formatoInfo.tentar.length - 1) {
         throw new Error(`Não foi possível baixar áudio em nenhum formato. Último erro: ${error.message}`);
       }
@@ -294,17 +286,9 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
         transcricaoTexto = resultadoGemini.texto;
         modeloUsado = resultadoGemini.modelo || 'gemini-2.5-flash-lite';
         
-        console.log(`[transcription-service] 📥 Resultado do Gemini recebido:`, {
-          tamanhoTexto: transcricaoTexto ? transcricaoTexto.length : 0,
-          textoPreview: transcricaoTexto ? transcricaoTexto.substring(0, 200) : 'N/A',
-          textoCompleto: transcricaoTexto || 'VAZIO',
-          modelo: modeloUsado
-        });
-        
         log('info', `Transcrição Gemini recebida`, {
           tamanhoTexto: transcricaoTexto ? transcricaoTexto.length : 0,
-          modelo: modeloUsado,
-          textoPreview: transcricaoTexto ? transcricaoTexto.substring(0, 100) : 'N/A'
+          modelo: modeloUsado
         });
         
         if (!transcricaoTexto || transcricaoTexto.length === 0) {
@@ -323,13 +307,6 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
         tamanhoTranscricao: transcricaoTexto.length
       });
 
-      console.log(`[transcription-service] 📤 Retornando resposta para API:`, {
-        tamanhoTranscricao: transcricaoTexto ? transcricaoTexto.length : 0,
-        textoPreview: transcricaoTexto ? transcricaoTexto.substring(0, 200) : 'N/A',
-        provider: tokenInfo.provider,
-        model: modeloUsado
-      });
-      
       return {
         success: true,
         transcription: transcricaoTexto,
