@@ -18,22 +18,21 @@ class ClickCallManager {
     this.perPageSelect = null;
     this._lastImportHash = null;
     this._lastImportFileName = null;
-    
-    // Configuração do servidor de webhook (backend local)
+
     this.webhookServerUrl = 'http://localhost:4201'; // Backend local onde o webhook-server.js está rodando
     this.webhookPollingInterval = 5000; // 5 segundos (ajustável)
     this.webhookPollingIntervalId = null;
     this._webhookConnectionErrorLogged = false;
-    
+
+    this.transcriptions = {}; // Armazena transcrições por código de gravação
+    this.transcribing = {}; // Controla estado de transcrição (loading)
+
     this.init();
   }
 
-  /**
-   * Inicializa a aplicação
-   */
   async init() {
     try {
-      // Aguarda dependências externas (XLSX e DOM pronto) antes de iniciar
+
       await this.waitForDependencies();
       this.setupElements();
       this.loadContactsFromStorage();
@@ -48,16 +47,13 @@ class ClickCallManager {
     }
   }
 
-  /**
-   * Aguarda o carregamento das dependências externas (XLSX e DOM)
-   */
   async waitForDependencies() {
     return new Promise((resolve, reject) => {
       const maxAttempts = 50;
       let attempts = 0;
       const checkDependencies = () => {
         attempts++;
-        // Só prossegue se XLSX já está disponível e o DOM está pronto
+
         if (typeof XLSX !== 'undefined' && document.readyState === 'complete') {
           resolve();
         } else if (attempts >= maxAttempts) {
@@ -70,10 +66,6 @@ class ClickCallManager {
     });
   }
 
-  /**
-   * Cria e posiciona dinamicamente todos os elementos da interface (inputs, botões, selects, etc)
-   * Isso permite que o HTML fique limpo e a ordem dos elementos seja controlada por código.
-   */
   setupElements() {
     this.uploadInput = document.getElementById('upload');
     this.contactsTable = document.getElementById('contactsTable');
@@ -102,7 +94,6 @@ class ClickCallManager {
     this.addSortEvents();
   }
 
-  // Cria um input do tipo especificado
   createInput(type, placeholder, className) {
     const input = document.createElement('input');
     input.type = type;
@@ -111,7 +102,6 @@ class ClickCallManager {
     return input;
   }
 
-  // Cria um botão com texto e classe
   createButton(text, className) {
     const btn = document.createElement('button');
     btn.textContent = text;
@@ -119,7 +109,6 @@ class ClickCallManager {
     return btn;
   }
 
-  // Cria um select (dropdown) com opções
   createSelect(className, options) {
     const select = document.createElement('select');
     select.className = className;
@@ -132,9 +121,6 @@ class ClickCallManager {
     return select;
   }
 
-  /**
-   * Adiciona eventos de clique nos cabeçalhos para ordenação dinâmica
-   */
   addSortEvents() {
     const thead = this.contactsTable.querySelector('thead tr');
     if (!thead) return;
@@ -164,9 +150,6 @@ class ClickCallManager {
     });
   }
 
-  /**
-   * Aplica ordenação e exibe os contatos filtrados/paginados
-   */
   applySortAndDisplay() {
     let data = this.filteredContacts !== null ? this.filteredContacts : this.contacts;
     if (this.sortField) {
@@ -187,32 +170,26 @@ class ClickCallManager {
     this.displayContacts(data);
   }
 
-  /**
-   * Vincula todos os eventos dos elementos dinâmicos
-   */
   bindEvents() {
     this.uploadInput.addEventListener('change', this.handleFileUpload.bind(this));
     this.addButton.addEventListener('click', this.handleAddContact.bind(this));
     this.exportButton.addEventListener('click', this.handleExport.bind(this));
     this.searchInput.addEventListener('input', this.handleSearch.bind(this));
-    // O evento do seletor de itens por página é adicionado dinamicamente em renderPagination
-    // para garantir que o elemento exista no DOM
+
     this.uploadInput.addEventListener('dragenter', this.handleDragEnter.bind(this));
     this.uploadInput.addEventListener('dragleave', this.handleDragLeave.bind(this));
     this.uploadInput.addEventListener('dragover', this.handleDragOver.bind(this));
     this.uploadInput.addEventListener('drop', this.handleDrop.bind(this));
   }
 
-  // Manipula a exportação dos contatos
   handleExport() {
     const format = this.exportSelect.value;
-    
-    // Para exportações, verifica se há contatos
+
     if (!this.contacts.length) {
       this.showWarning('Não há contatos para exportar.');
       return;
     }
-    
+
     const data = this.contacts.map(c => ({
       'CONTATO': c.CONTATO || c.contato || c.NOME || c.nome || c.PESSOA || c.pessoa || c.CLIENTE || c.cliente || '',
       'CPF / CNPJ': c.CPF || c.cpf || c.CNPJ || c.cnpj || '',
@@ -224,13 +201,12 @@ class ClickCallManager {
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Contatos');
-    
-    // Gera data e hora atuais no formato DD-MM-YYYY_HH-mm
+
     const now = new Date();
     const pad = n => n.toString().padStart(2, '0');
     const dateStr = `${pad(now.getDate())}-${pad(now.getMonth()+1)}-${now.getFullYear()}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
     const fileName = `ClickCall(${dateStr}).${format}`;
-    
+
     if (format === 'csv') {
       const csv = XLSX.utils.sheet_to_csv(ws);
       this.downloadFile(csv, fileName, 'text/csv');
@@ -241,9 +217,8 @@ class ClickCallManager {
     }
   }
 
-  // Exporta tabela padrão (template) para o usuário preencher
   exportTemplate() {
-    // Cria dados de exemplo para mostrar o formato correto
+
     const templateData = [
       {
         'CONTATO': 'João Silva',
@@ -271,34 +246,29 @@ class ClickCallManager {
       }
     ];
 
-    // Cria a planilha com os dados de exemplo
     const ws = XLSX.utils.json_to_sheet(templateData);
-    
-    // Adiciona formatação e validação
+
     this.addTemplateFormatting(ws);
-    
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Template Contatos');
-    
-    // Adiciona uma aba de instruções
+
     this.addInstructionsSheet(wb);
-    
-    // Gera nome do arquivo
+
     const now = new Date();
     const pad = n => n.toString().padStart(2, '0');
     const dateStr = `${pad(now.getDate())}-${pad(now.getMonth()+1)}-${now.getFullYear()}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
     const fileName = `ClickCall_Template(${dateStr}).xlsx`;
-    
+
     const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([wbout], { type: 'application/octet-stream' });
     this.downloadFile(blob, fileName);
-    
+
     this.showSuccess('Tabela padrão exportada com sucesso! Preencha os dados e importe novamente.');
   }
 
-  // Adiciona formatação à planilha template
   addTemplateFormatting(ws) {
-    // Define larguras das colunas
+
     const colWidths = [
       { wch: 25 }, // CONTATO
       { wch: 18 }, // CPF / CNPJ
@@ -308,8 +278,7 @@ class ClickCallManager {
       { wch: 30 }  // OBSERVAÇÃO
     ];
     ws['!cols'] = colWidths;
-    
-    // Define estilos para o cabeçalho (primeira linha)
+
     const headerRange = XLSX.utils.decode_range(ws['!ref']);
     for (let col = headerRange.s.c; col <= headerRange.e.c; col++) {
       const cellAddress = XLSX.utils.encode_cell({ r: 0, c: col });
@@ -323,7 +292,6 @@ class ClickCallManager {
     }
   }
 
-  // Adiciona aba de instruções ao template
   addInstructionsSheet(wb) {
     const instructions = [
       ['INSTRUÇÕES PARA PREENCHIMENTO DA TABELA'],
@@ -350,24 +318,23 @@ class ClickCallManager {
       ['• Para importar, use o botão "Escolher arquivo" no sistema'],
       ['• O sistema aceita arquivos .xlsx e .csv']
     ];
-    
+
     const wsInstructions = XLSX.utils.aoa_to_sheet(instructions);
-    
-    // Formata a aba de instruções
+
     const instructionRange = XLSX.utils.decode_range(wsInstructions['!ref']);
     for (let row = instructionRange.s.r; row <= instructionRange.e.r; row++) {
       for (let col = instructionRange.s.c; col <= instructionRange.e.c; col++) {
         const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
         if (wsInstructions[cellAddress]) {
           if (row === 0) {
-            // Título principal
+
             wsInstructions[cellAddress].s = {
               font: { bold: true, size: 14, color: { rgb: 'FFFFFF' } },
               fill: { fgColor: { rgb: '2E75B6' } },
               alignment: { horizontal: 'center' }
             };
           } else if (row === 2 || row === 7 || row === 12 || row === 18) {
-            // Subtítulos
+
             wsInstructions[cellAddress].s = {
               font: { bold: true, color: { rgb: '2E75B6' } },
               fill: { fgColor: { rgb: 'D9E2F3' } }
@@ -376,16 +343,12 @@ class ClickCallManager {
         }
       }
     }
-    
-    // Define largura das colunas da aba de instruções
+
     wsInstructions['!cols'] = [{ wch: 80 }];
-    
+
     XLSX.utils.book_append_sheet(wb, wsInstructions, 'Instruções');
   }
 
-  /**
-   * Faz o download de um arquivo no navegador
-   */
   downloadFile(data, filename, mimeType) {
     let url;
     if (typeof data === 'string') {
@@ -404,28 +367,24 @@ class ClickCallManager {
     }, 100);
   }
 
-  // Carrega os contatos do localStorage
   loadContactsFromStorage() {
     const data = localStorage.getItem(this.localStorageKey);
     if (data) {
       try {
         this.contacts = JSON.parse(data);
-        
-        // Migração: adicionar campo gravacoes[] se não existir
+
         this.contacts = this.contacts.map((contact, index) => {
           if (!contact.gravacoes) {
             contact.gravacoes = [];
           }
-          // Log para debug de gravações
+
           if (contact.gravacoes && contact.gravacoes.length > 0) {
           }
           return contact;
         });
-        
-        // Contar total de gravações
+
         const totalGravacoes = this.contacts.reduce((total, c) => total + (c.gravacoes?.length || 0), 0);
-        
-        // Salvar após migração se houver alterações
+
         this.saveContactsToStorage();
       } catch (e) {
         console.error('[loadContactsFromStorage] ERRO ao carregar contatos:', e);
@@ -435,12 +394,10 @@ class ClickCallManager {
     }
   }
 
-  // Salva os contatos no localStorage
   saveContactsToStorage() {
     localStorage.setItem(this.localStorageKey, JSON.stringify(this.contacts));
   }
 
-  // Manipula a busca na lista de contatos
   handleSearch() {
     const term = this.searchInput.value.trim().toLowerCase();
     this.currentPage = 1;
@@ -449,7 +406,7 @@ class ClickCallManager {
       this.applySortAndDisplay();
       return;
     }
-    // Para busca de CPF sem pontuação
+
     const termDigits = term.replace(/\D/g, '');
     this.filteredContacts = this.contacts.filter(c => {
       const cpfDigits = c.cpf ? c.cpf.replace(/\D/g, '') : '';
@@ -466,7 +423,6 @@ class ClickCallManager {
     this.applySortAndDisplay();
   }
 
-  // Manipula a adição manual de um novo contato
   handleAddContact() {
     const tbody = this.contactsTable.querySelector('tbody');
     if (tbody.querySelector('.edit-row')) return;
@@ -489,13 +445,11 @@ class ClickCallManager {
     tdActions.appendChild(btnCancel);
     tbody.insertBefore(tr, tbody.firstChild);
 
-    // Máscara dinâmica para CPF
     const cpfInput = tr.children[1].querySelector('input');
     cpfInput.addEventListener('input', function() {
       this.value = formatarCpfCnpj(this.value);
     });
 
-    // Textarea dinâmica para observação
     const obsTextarea = tr.children[6].querySelector('textarea');
     obsTextarea.addEventListener('input', function() {
       this.style.height = 'auto';
@@ -535,14 +489,10 @@ class ClickCallManager {
     };
   }
 
-  /**
-   * Renderiza a paginação e posiciona o seletor de itens por página à direita
-   * O seletor é criado apenas uma vez e reaproveitado
-   */
   renderPagination(totalPages) {
     if (!this.paginationDiv) return;
     this.paginationDiv.innerHTML = '';
-    // Renderiza botões de navegação apenas se houver mais de uma página
+
     if (totalPages > 1) {
       const prevBtn = this.createButton('Anterior', '');
       prevBtn.disabled = this.currentPage === 1;
@@ -566,12 +516,12 @@ class ClickCallManager {
       this.paginationDiv.appendChild(pageInfo);
       this.paginationDiv.appendChild(nextBtn);
     } else {
-      // Mesmo com uma página, mostra o texto de página
+
       const pageInfo = document.createElement('span');
       pageInfo.textContent = `Página 1 de 1`;
       this.paginationDiv.appendChild(pageInfo);
     }
-    // O seletor de itens por página deve ser sempre exibido
+
     if (!this.perPageSelect) {
       this.perPageSelect = this.createSelect('per-page-select', [
         { value: '10', text: '10 por página' },
@@ -587,21 +537,18 @@ class ClickCallManager {
     this.paginationDiv.appendChild(perPageWrapper);
   }
 
-  // Manipula a mudança de itens por página
   handlePerPageChange() {
     this.contactsPerPage = parseInt(this.perPageSelect.value, 10);
     this.currentPage = 1;
     this.applySortAndDisplay();
   }
 
-  // Cria uma linha de contato na tabela
   createContactRow(contact, index) {
     const tr = document.createElement('tr');
     tr.className = 'contact-row';
-    // Ordem: CONTATO, CPF, RAMAL, TELEFONE, JÁ LIGUEI, AÇÃO, OBSERVAÇÃO, GRAVAÇÃO
+
     const callLink = this.createCallLink(contact.ramal, contact.numero, contact.contato);
-    // Verifica se o contato tem um contato para mostrar o ícone de gravação
-    // O ícone só aparece se o contato tiver um nome (contato)
+
     const temContato = contact.contato && contact.contato.trim() !== '';
     const gravarIcone = temContato 
       ? '<button class="gravar-btn" title="Ver gravação" data-contact-index="' + index + '">🎧</button>'
@@ -618,7 +565,7 @@ class ClickCallManager {
     `;
     const checkbox = tr.querySelector('.checkbox-done');
     checkbox.addEventListener('change', () => {
-      // Busca o índice real do contato no array principal usando ramal + telefone como chave
+
       const realIndex = this.contacts.findIndex(c => c.ramal === contact.ramal && c.numero === contact.numero);
       if (realIndex !== -1) {
         this.contacts[realIndex].done = checkbox.checked;
@@ -643,11 +590,11 @@ class ClickCallManager {
       };
     } else {
     }
-    // Botão de gravação: abre modal com áudio e transcrição
+
     const btnGravacao = tr.querySelector('.gravar-btn');
     if (btnGravacao) {
       btnGravacao.onclick = () => {
-        // Busca o contato completo do array principal para garantir que temos todos os dados
+
         const realIndex = this.contacts.findIndex(c => 
           c.ramal === contact.ramal && 
           c.numero === contact.numero && 
@@ -657,7 +604,7 @@ class ClickCallManager {
         this.showRecordingModal(contatoCompleto);
       };
     }
-    // Observação: só mostra textarea ao clicar
+
     const obsDiv = tr.querySelector('.obs-view');
     obsDiv.onclick = () => {
       if (tr.querySelector('textarea')) return;
@@ -674,7 +621,7 @@ class ClickCallManager {
         this.style.height = 'auto';
         this.style.height = (this.scrollHeight) + 'px';
       });
-      // Salvar ao pressionar Enter
+
       textarea.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
@@ -684,7 +631,7 @@ class ClickCallManager {
           cancelarObs();
         }
       });
-      // Cria os botões Salvar/Cancelar para a coluna ação
+
       const btnSalvar = document.createElement('button');
       btnSalvar.textContent = 'Salvar';
       btnSalvar.className = 'save-btn';
@@ -693,12 +640,12 @@ class ClickCallManager {
       btnCancelar.textContent = 'Cancelar';
       btnCancelar.className = 'cancel-btn';
       btnCancelar.onclick = cancelarObs;
-      // Função auxiliar para restaurar botões padrão
+
       function restaurarBotoes() {
         tdAcao.innerHTML = `${callLink}<button class="edit-btn" title="Editar">Editar</button><button class="delete-btn" title="Remover">Remover</button>`;
         tdAcao.querySelector('.edit-btn').onclick = () => self.handleEditContact(tr, contact, index);
         tdAcao.querySelector('.delete-btn').onclick = () => self.handleDeleteContact(index);
-        
+
         const callButton = tdAcao.querySelector('.call-button');
         if (callButton) {
           callButton.onclick = () => {
@@ -707,8 +654,7 @@ class ClickCallManager {
           };
         }
       }
-      
-      // Funções de ação
+
       function salvarObs() {
         contact.observacao = textarea.value.trim();
         self.saveContactsToStorage();
@@ -717,7 +663,7 @@ class ClickCallManager {
         obsDiv.style.minHeight = '24px';
         obsDiv.style.padding = '4px 0';
         obsDiv.style.cursor = 'pointer';
-        // Restaura botões padrão na coluna ação
+
         restaurarBotoes();
       }
       function cancelarObs() {
@@ -726,16 +672,16 @@ class ClickCallManager {
         obsDiv.style.minHeight = '24px';
         obsDiv.style.padding = '4px 0';
         obsDiv.style.cursor = 'pointer';
-        // Restaura botões padrão na coluna ação
+
         restaurarBotoes();
       }
-      // Substitui conteúdo e exibe textarea
+
       obsDiv.innerHTML = '';
       obsDiv.appendChild(textarea);
       textarea.focus();
       textarea.setSelectionRange(textarea.value.length, textarea.value.length);
       textarea.dispatchEvent(new Event('input'));
-      // Troca botões da coluna ação
+
       const tdAcao = tr.querySelector('.td-acao');
       const self = this;
       tdAcao.innerHTML = '';
@@ -745,90 +691,77 @@ class ClickCallManager {
     return tr;
   }
 
-  // Função utilitária para formatar número de telefone no padrão DDD+NÚMERO (ex: 16981892476)
   formatarNumeroTelefone(numero) {
     if (!numero) return '';
-    // Remove tudo que não for dígito
+
     return numero.toString().replace(/\D/g, '');
   }
-  // Cria o link de chamada para o contato
+
   createCallLink(ramal, numero, contatoNome) {
     if (!ramal && !numero) {
       console.warn('[createCallLink] Dados insuficientes para criar link de chamada');
       return '<span class="no-data">Dados insuficientes</span>';
     }
-    
-    // Formata o número para DDD+NÚMERO (ex: 16981892476)
+
     const numeroFormatado = this.formatarNumeroTelefone(numero);
-    
-    // Montar URL com callid (nome do contato) se disponível
+
     let link = `https://delorean.krolik.com.br/services/call?ramal=${encodeURIComponent(ramal)}&numero=${encodeURIComponent(numeroFormatado)}`;
     if (contatoNome && contatoNome.trim() !== '') {
       link += `&callid=${encodeURIComponent(contatoNome.trim())}`;
     }
-    
+
     return `<button type="button" class="call-button" title="Fazer chamada" data-call-url="${link}">📞 Ligar</button>`;
   }
 
-  // Executa a chamada de forma oculta
   executeCall(url) {
     if (!url) {
       console.error('[executeCall] URL não fornecida!');
       this.showError('Erro: URL da chamada não fornecida.');
       return;
     }
-    
+
     try {
-      // Cria um iframe invisível para fazer a requisição
+
       const iframe = document.createElement('iframe');
       iframe.style.display = 'none';
       iframe.style.width = '0';
       iframe.style.height = '0';
       iframe.style.border = 'none';
       iframe.src = url;
-      
-      // Adiciona o iframe ao DOM
+
       document.body.appendChild(iframe);
-      
-      // Adiciona evento de load para verificar se carregou
+
       iframe.onload = () => {
         this.showSuccess('Chamada iniciada! Consulte o softphone.');
       };
-      
-      // Adiciona evento de error para capturar erros
+
       iframe.onerror = (error) => {
         console.error('[executeCall] Erro ao carregar iframe:', error);
         this.showError('Erro ao iniciar chamada. Tente novamente.');
       };
-      
-      // Mostra feedback imediato para o usuário
+
       this.showSuccess('Chamada iniciada! Consulte o softphone.');
-      
-      // Remove o iframe após um tempo para limpar o DOM
+
       setTimeout(() => {
         if (document.body.contains(iframe)) {
           document.body.removeChild(iframe);
         }
       }, 5000);
-      
+
     } catch (error) {
       console.error('[executeCall] Erro:', error);
       this.showError('Erro ao iniciar chamada. Tente novamente.');
     }
   }
 
-
-
-  // Exibe mensagem de estado vazio na tabela
   showEmptyState(tbody) {
     const tr = document.createElement('tr');
-    // Descobre o número de colunas da tabela dinamicamente
+
     const thCount = this.contactsTable.querySelectorAll('thead th').length;
     tr.innerHTML = `<td colspan="${thCount}" class="empty-state">Nenhum contato encontrado</td>`;
     tbody.appendChild(tr);
   }
 
-  // Anima as linhas da tabela ao exibir
   animateTableRows() {
     const rows = document.querySelectorAll('.contact-row');
     rows.forEach((row, index) => {
@@ -840,33 +773,276 @@ class ClickCallManager {
         row.style.transform = 'translateY(0)';
       }, index * 50);
     });
-  }
+      }
 
-  // Escapa HTML para evitar XSS
+    async transcreverAudio(gravacao, index) {
+      const codigo = gravacao.codigo;
+      const companyCode = gravacao.company_id || '100'; // Usar company_id do webhook ou padrão
+
+      if (!codigo) {
+        alert('❌ Código da gravação não disponível');
+        return;
+      }
+
+      if (this.transcribing[codigo]) {
+        console.log('[transcreverAudio] Já está transcrevendo esta gravação');
+        return;
+      }
+
+      if (this.transcriptions[codigo]) {
+        console.log('[transcreverAudio] Transcrição já existe, exibindo...');
+        this.exibirTranscricao(codigo, index);
+        return;
+      }
+
+      this.transcribing[codigo] = true;
+
+      this.mostrarLoadingTranscricao(codigo, index);
+
+      try {
+
+        let audioUrl = gravacao.url || '';
+        if (!audioUrl && codigo) {
+
+          const calldate = gravacao.calldate || '';
+          let ehGravacaoDeHoje = false;
+
+          if (calldate) {
+            try {
+              const calldateStr = calldate.replace(/\+/g, ' ').replace(/%3A/g, ':');
+              const dataGravacao = new Date(calldateStr);
+              const hoje = new Date();
+
+              const dataGravacaoSemHora = new Date(
+                dataGravacao.getFullYear(),
+                dataGravacao.getMonth(),
+                dataGravacao.getDate()
+              );
+              const hojeSemHora = new Date(
+                hoje.getFullYear(),
+                hoje.getMonth(),
+                hoje.getDate()
+              );
+
+              ehGravacaoDeHoje = dataGravacaoSemHora.getTime() === hojeSemHora.getTime();
+            } catch (e) {
+              console.warn('[transcreverAudio] Erro ao parsear data:', e);
+            }
+          }
+
+          audioUrl = ehGravacaoDeHoje 
+            ? `https://delorean.krolik.com.br/records/${codigo}.wav`
+            : `https://delorean.krolik.com.br/records/${codigo}.mp3`;
+        }
+
+        const response = await fetch(`${this.webhookServerUrl}/api/transcribe`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            audioUrl: audioUrl,
+            codigo: codigo,
+            companyCode: companyCode,
+            calldate: gravacao.calldate || ''
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || `Erro HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data.success && data.transcription) {
+
+          this.transcriptions[codigo] = {
+            texto: data.transcription,
+            provider: data.provider,
+            model: data.model,
+            duration: data.duration,
+            requestId: data.requestId,
+            timestamp: new Date().toISOString()
+          };
+
+          this.exibirTranscricao(codigo, index);
+
+          console.log('[transcreverAudio] ✅ Transcrição concluída', {
+            provider: data.provider,
+            duration: data.duration,
+            tamanho: data.transcription.length
+          });
+        } else {
+          throw new Error(data.message || 'Erro desconhecido na transcrição');
+        }
+
+      } catch (error) {
+        console.error('[transcreverAudio] ❌ Erro:', error);
+
+        this.mostrarErroTranscricao(codigo, index, error.message);
+
+        this.showTranscriptionErrorModal(error.message);
+      } finally {
+
+        delete this.transcribing[codigo];
+      }
+    }
+
+    transcreverAudioPorButton(buttonElement) {
+      const codigo = buttonElement.getAttribute('data-codigo');
+      const index = parseInt(buttonElement.getAttribute('data-index'));
+      const companyId = buttonElement.getAttribute('data-company-id') || '100';
+      const calldate = buttonElement.getAttribute('data-calldate') || '';
+
+      if (!codigo) {
+        alert('❌ Código da gravação não encontrado');
+        return;
+      }
+
+      const gravacao = {
+        codigo: codigo,
+        company_id: companyId,
+        calldate: calldate,
+        url: '' // Será montada automaticamente
+      };
+
+      this.transcreverAudio(gravacao, index);
+    }
+
+    mostrarLoadingTranscricao(codigo, index) {
+      const transcricaoElement = document.getElementById(`transcricao-${index}`);
+      if (transcricaoElement) {
+        transcricaoElement.innerHTML = `
+          <div style="color: #c8007e; font-size: 0.95rem; text-align: center; padding: 20px;">
+            <div style="display: inline-block; animation: spin 1s linear infinite; font-size: 1.5rem; margin-bottom: 8px;">⏳</div>
+            <div>Transcrevendo áudio...</div>
+            <div style="font-size: 0.85rem; color: #999; margin-top: 8px;">Isso pode levar alguns segundos</div>
+          </div>
+          <style>
+            @keyframes spin {
+              from { transform: rotate(0deg); }
+              to { transform: rotate(360deg); }
+            }
+          </style>
+        `;
+      }
+    }
+
+    exibirTranscricao(codigo, index) {
+      const transcricao = this.transcriptions[codigo];
+      if (!transcricao) return;
+
+      const transcricaoElement = document.getElementById(`transcricao-${index}`);
+      if (transcricaoElement) {
+        transcricaoElement.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="color: #c8007e; font-size: 0.9rem; font-weight: 600;">
+              📝 Transcrição (${transcricao.provider === 'openai' ? 'OpenAI' : 'Gemini'})
+            </div>
+            <button 
+              onclick="copiarTranscricao('${codigo}', ${index}, event)"
+              style="
+                background: rgba(123,0,81,0.8);
+                color: #fff;
+                border: none;
+                border-radius: 8px;
+                padding: 6px 12px;
+                font-size: 0.85rem;
+                cursor: pointer;
+                transition: background 0.2s;
+              "
+              onmouseover="this.style.background='rgba(123,0,81,1)'"
+              onmouseout="this.style.background='rgba(123,0,81,0.8)'"
+              title="Copiar transcrição"
+            >
+              📋 Copiar
+            </button>
+          </div>
+          <div style="
+            color: #fff;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            text-align: left;
+            background: rgba(255,255,255,0.05);
+            padding: 12px;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+          ">${this.escapeHtml(transcricao.texto)}</div>
+          <div style="
+            color: #999;
+            font-size: 0.8rem;
+            margin-top: 8px;
+            text-align: right;
+          ">
+            Tempo de processamento: ${transcricao.duration.toFixed(2)}s
+          </div>
+        `;
+      }
+    }
+
+    mostrarErroTranscricao(codigo, index, mensagemErro) {
+      const transcricaoElement = document.getElementById(`transcricao-${index}`);
+      if (transcricaoElement) {
+        transcricaoElement.innerHTML = `
+          <div style="
+            color: #ff6666;
+            font-size: 0.9rem;
+            text-align: center;
+            padding: 16px;
+            background: rgba(255,0,0,0.1);
+            border-radius: 8px;
+            border: 1px solid rgba(255,0,0,0.3);
+          ">
+            <div style="font-size: 1.2rem; margin-bottom: 8px;">❌</div>
+            <div style="font-weight: 600; margin-bottom: 4px;">Erro ao transcrever</div>
+            <div style="font-size: 0.85rem; color: #ff9999;">${this.escapeHtml(mensagemErro)}</div>
+            <button 
+              data-codigo="${codigo}"
+              data-index="${index}"
+              onclick="window.clickCallManager.transcreverAudioPorButton(this)"
+              style="
+                margin-top: 12px;
+                background: rgba(123,0,81,0.8);
+                color: #fff;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-size: 0.85rem;
+                cursor: pointer;
+              "
+            >
+              🔄 Tentar Novamente
+            </button>
+          </div>
+        `;
+      }
+    }
+
   escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
   }
 
-  // Evento de drag enter no input de upload
   handleDragEnter(e) {
     e.preventDefault();
     this.uploadInput.classList.add('drag-over');
   }
 
-  // Evento de drag leave no input de upload
   handleDragLeave(e) {
     e.preventDefault();
     this.uploadInput.classList.remove('drag-over');
   }
 
-  // Evento de drag over no input de upload
   handleDragOver(e) {
     e.preventDefault();
   }
 
-  // Evento de drop no input de upload
   handleDrop(e) {
     e.preventDefault();
     this.uploadInput.classList.remove('drag-over');
@@ -877,32 +1053,26 @@ class ClickCallManager {
     }
   }
 
-  // Exibe toast de carregando
   showLoading(message) {
     this.showMessage(message, 'loading');
   }
 
-  // Exibe toast de sucesso
   showSuccess(message) {
     this.showMessage(message, 'success');
   }
 
-  // Exibe toast de aviso
   showWarning(message) {
     this.showMessage(message, 'warning');
   }
 
-  // Exibe toast de erro
   showError(message) {
     this.showMessage(message, 'error');
   }
 
-  // Esconde qualquer toast
   hideLoading() {
     this.hideMessage();
   }
 
-  // Exibe toast customizado
   showMessage(message, type = 'info') {
     this.hideMessage();
     const messageDiv = document.createElement('div');
@@ -917,13 +1087,11 @@ class ClickCallManager {
     }
   }
 
-  // Esconde qualquer toast
   hideMessage() {
     const existing = document.querySelector('.toast');
     if (existing) existing.remove();
   }
 
-  // Exibe modal de confirmação customizada
   showConfirm(message, onConfirm) {
     const oldModal = document.getElementById('custom-modal-confirm');
     if (oldModal) oldModal.remove();
@@ -949,29 +1117,125 @@ class ClickCallManager {
     };
   }
 
-  // Formata data/hora para exibição legível
+  showTranscriptionErrorModal(errorMessage) {
+    const oldModal = document.getElementById('modal-transcricao-erro');
+    if (oldModal) oldModal.remove();
+    const modal = document.createElement('div');
+    modal.id = 'modal-transcricao-erro';
+    modal.className = 'modal-confirm-bg';
+    modal.style.display = 'flex';
+    modal.style.alignItems = 'center';
+    modal.style.justifyContent = 'center';
+    modal.style.zIndex = '10000';
+    const mensagemEscapada = this.escapeHtml(errorMessage || 'Erro desconhecido');
+    modal.innerHTML = `
+      <div class="modal-confirm" style="
+        width: 100%;
+        max-width: 500px;
+        min-width: 320px;
+        box-sizing: border-box;
+        background: rgba(40,40,60,0.95);
+        backdrop-filter: blur(8px);
+        border-radius: 24px;
+        box-shadow: 0 12px 48px rgba(0,0,0,0.3);
+        padding: 32px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 24px;
+      ">
+        <div style="
+          font-size: 3rem;
+          color: #ff4444;
+          margin-bottom: 8px;
+        ">❌</div>
+        <div style="
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: #fff;
+          text-align: center;
+          margin-bottom: 8px;
+        ">Erro ao transcrever áudio</div>
+        <div style="
+          width: 100%;
+          background: rgba(255,68,68,0.1);
+          border-left: 4px solid #ff4444;
+          border-radius: 8px;
+          padding: 16px;
+          color: #ffaaaa;
+          font-size: 0.95rem;
+          line-height: 1.6;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+          text-align: left;
+          max-height: 200px;
+          overflow-y: auto;
+        ">${mensagemEscapada}</div>
+        <button id="close-modal-transcricao-erro" class="modal-btn-confirm" style="
+          width: 100%;
+          max-width: 200px;
+          font-size: 1rem;
+          padding: 12px 24px;
+          border-radius: 12px;
+          background: linear-gradient(90deg, #7b0051 60%, #c8007e 100%);
+          color: #fff;
+          font-weight: 600;
+          border: none;
+          box-shadow: 0 2px 8px rgba(123,0,81,0.3);
+          cursor: pointer;
+          transition: background 0.2s, transform 0.2s;
+        " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">OK</button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    const closeBtn = document.getElementById('close-modal-transcricao-erro');
+    closeBtn.onclick = () => {
+      modal.remove();
+    };
+    modal.onclick = (e) => {
+      if (e.target === modal) {
+        modal.remove();
+      }
+    };
+  }
+
   formatarDataHora(calldate) {
-    if (!calldate) return 'Data não disponível';
+    if (!calldate || calldate === '') {
+      console.warn('[formatarDataHora] calldate vazio ou inválido:', calldate);
+      return 'Data não disponível';
+    }
+
     try {
-      // Formato esperado: 2025-10-29 11:29:03 ou 2025-10-29+11%3A29%3A03 (URL-encoded)
-      let dataStr = calldate.replace(/\+/g, ' ').replace(/%3A/g, ':');
+
+      let dataStr = calldate.toString()
+        .replace(/\+/g, ' ')
+        .replace(/%3A/g, ':')
+        .replace(/%2F/g, '/')
+        .replace(/%20/g, ' ')
+        .trim();
+
       let data = new Date(dataStr);
+
       if (isNaN(data.getTime())) {
-        // Tentar parse manual se Date falhar
-        const partes = dataStr.split(/[\s\-:]/);
+
+        const partes = dataStr.split(/[\s\-:T]/);
         if (partes.length >= 6) {
-          const ano = parseInt(partes[0]);
-          const mes = parseInt(partes[1]) - 1;
-          const dia = parseInt(partes[2]);
-          const hora = parseInt(partes[3] || 0);
-          const minuto = parseInt(partes[4] || 0);
-          const segundo = parseInt(partes[5] || 0);
-          const dataManual = new Date(ano, mes, dia, hora, minuto, segundo);
-          if (!isNaN(dataManual.getTime())) {
-            data = dataManual;
+          const ano = parseInt(partes[0], 10);
+          const mes = parseInt(partes[1], 10) - 1;
+          const dia = parseInt(partes[2], 10);
+          const hora = parseInt(partes[3] || 0, 10);
+          const minuto = parseInt(partes[4] || 0, 10);
+          const segundo = parseInt(partes[5] || 0, 10);
+
+          if (!isNaN(ano) && !isNaN(mes) && !isNaN(dia)) {
+            const dataManual = new Date(ano, mes, dia, hora, minuto, segundo);
+            if (!isNaN(dataManual.getTime())) {
+              data = dataManual;
+            }
           }
         }
       }
+
       if (!isNaN(data.getTime())) {
         const dia = String(data.getDate()).padStart(2, '0');
         const mes = String(data.getMonth() + 1).padStart(2, '0');
@@ -981,13 +1245,15 @@ class ClickCallManager {
         const segundo = String(data.getSeconds()).padStart(2, '0');
         return `${dia}/${mes}/${ano} ${hora}:${minuto}:${segundo}`;
       }
+
+      console.warn('[formatarDataHora] Não foi possível formatar a data:', calldate, 'dataStr:', dataStr);
       return calldate; // Retorna original se não conseguir formatar
     } catch (e) {
+      console.error('[formatarDataHora] Erro ao formatar data:', e, 'calldate:', calldate);
       return calldate;
     }
   }
 
-  // Formata duração em segundos para mm:ss
   formatarDuracao(segundos) {
     if (!segundos || isNaN(segundos)) return '0:00';
     const seg = parseInt(segundos);
@@ -996,7 +1262,6 @@ class ClickCallManager {
     return `${minutos}:${String(segs).padStart(2, '0')}`;
   }
 
-  // Exibe modal de gravação com áudio e transcrição
   showRecordingModal(contact) {
     const oldModal = document.getElementById('modal-gravacao');
     if (oldModal) oldModal.remove();
@@ -1007,16 +1272,12 @@ class ClickCallManager {
     modal.style.alignItems = 'center';
     modal.style.justifyContent = 'center';
     modal.style.zIndex = '9999';
-    
+
     const nomeContato = this.escapeHtml(contact.contato || 'Contato sem nome');
     const telefoneContato = this.escapeHtml(formatarNumeroVisual(contact.numero) || 'Sem telefone');
-    
-    // Buscar contato atualizado (com gravações)
-    // IMPORTANTE: Recarregar do localStorage para garantir dados atualizados
+
     this.loadContactsFromStorage();
-    
-    
-    // Buscar contato com match mais flexível (ramal pode ser sufixo)
+
     const contatoAtualizado = this.contacts.find(c => {
       const ramalMatch = c.ramal && contact.ramal && (
         c.ramal.toString() === contact.ramal.toString() ||
@@ -1029,16 +1290,14 @@ class ClickCallManager {
       const contatoMatch = c.contato && contact.contato && (
         c.contato.toString().trim() === contact.contato.toString().trim()
       );
-      
+
       return (ramalMatch || contatoMatch) && numeroMatch;
     }) || contact;
-    
-    
+
     const gravacoes = (contatoAtualizado.gravacoes || []).length > 0 
       ? contatoAtualizado.gravacoes 
       : null;
-    
-    // Gerar HTML da lista de gravações
+
     let gravacoesHTML = '';
     if (!gravacoes || gravacoes.length === 0) {
       gravacoesHTML = `
@@ -1053,72 +1312,70 @@ class ClickCallManager {
         </div>
       `;
     } else {
-      // Ordenar por data (mais recente primeiro)
+
       const gravacoesOrdenadas = [...gravacoes].sort((a, b) => {
         const dateA = new Date(a.calldate.replace(/\+/g, ' ').replace(/%3A/g, ':'));
         const dateB = new Date(b.calldate.replace(/\+/g, ' ').replace(/%3A/g, ':'));
         return dateB - dateA; // Mais recente primeiro
       });
-      
-      gravacoesHTML = gravacoesOrdenadas.map((gravacao, index) => {
-        const dataFormatada = this.formatarDataHora(gravacao.calldate);
-        const duracaoFormatada = this.formatarDuracao(gravacao.billsec);
-        
-        // Status da ligação: sempre "Atendida" se há gravação
-        // Pois não haveria gravação se a ligação não fosse atendida
+
+              gravacoesHTML = gravacoesOrdenadas.map((gravacao, index) => {
+
+          if (!gravacao.calldate || gravacao.calldate === '') {
+            console.warn('[displayGravacoes] Gravacao sem calldate:', {
+              codigo: gravacao.codigo,
+              gravacaoKeys: Object.keys(gravacao),
+              gravacaoCalldate: gravacao.calldate
+            });
+          }
+
+          const dataFormatada = this.formatarDataHora(gravacao.calldate);       
+          const duracaoFormatada = this.formatarDuracao(gravacao.billsec);
+
         const dispositionValue = 'Atendida';
         const dispositionFormatado = this.escapeHtml(dispositionValue);
-        
-        // Exibir callid se disponível
+
         const callidDisplay = gravacao.callid ? ` • CallID: ${this.escapeHtml(gravacao.callid)}` : '';
-        
-        // Verificar e processar URL da gravação (APENAS para exibição)
+
         let urlGravacao = gravacao.url || '';
         if (!urlGravacao && gravacao.codigo) {
-          // Fallback: construir URL se não vier do n8n
+
           urlGravacao = `https://delorean.krolik.com.br/services/record/${gravacao.codigo}`;
         }
-        
-        // Detectar formato baseado na data da gravação
-        // Se for de hoje: .wav, se for passado: .mp3 (após conversão automática à meia-noite)
+
         let urlGravacaoWav = '';
         let urlGravacaoMp3 = '';
         let ehGravacaoDeHoje = false;
-        
+
         if (urlGravacao && gravacao.codigo) {
-          // Tentar detectar se é de hoje baseado no calldate
+
           try {
             if (gravacao.calldate) {
-              // Parse da data da gravação
+
               const calldateStr = gravacao.calldate.replace(/\+/g, ' ').replace(/%3A/g, ':');
               const dataGravacao = new Date(calldateStr);
               const hoje = new Date();
-              
-              // Comparar apenas data (sem hora) - verifica se é o mesmo dia
+
               const dataGravacaoSemHora = new Date(dataGravacao.getFullYear(), dataGravacao.getMonth(), dataGravacao.getDate());
               const hojeSemHora = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
-              
+
               ehGravacaoDeHoje = dataGravacaoSemHora.getTime() === hojeSemHora.getTime();
             }
           } catch (e) {
-            // Se houver erro ao parsear data, assume que não é de hoje (mais seguro)
+
             console.warn('[displayGravacoes] Erro ao parsear data da gravação:', e);
             ehGravacaoDeHoje = false;
           }
-          
-          // Montar URLs para ambos formatos
+
           urlGravacaoWav = `https://delorean.krolik.com.br/records/${gravacao.codigo}.wav`;
           urlGravacaoMp3 = `https://delorean.krolik.com.br/records/${gravacao.codigo}.mp3`;
-          
-          // URL principal será a mais provável baseado na data
+
           urlGravacao = ehGravacaoDeHoje ? urlGravacaoWav : urlGravacaoMp3;
         }
-        
-        // Não usar escapeHtml na URL - pode quebrar caracteres especiais
-        // Usar encodeURI apenas para componentes da URL se necessário
+
         const urlGravacaoFinal = urlGravacao;
         const urlGravacaoEscapadaParaExibicao = this.escapeHtml(urlGravacao); // Apenas para exibição no link
-        
+
         return `
           <div class="gravacao-card" style="
             width: 100%;
@@ -1144,7 +1401,7 @@ class ClickCallManager {
                 </div>
               </div>
             </div>
-            
+
             <!-- Player de Áudio Simples -->
             <div class="simple-audio-player" style="width: 100%; max-width: 100%; box-sizing: border-box; margin-bottom: 20px; overflow: hidden;">
               ${urlGravacaoFinal ? `
@@ -1167,7 +1424,7 @@ class ClickCallManager {
                     <source src="${urlGravacaoFinal}" type="${ehGravacaoDeHoje ? 'audio/wav' : 'audio/mpeg'}">
                   `}
                 </audio>
-                
+
                 <!-- Controles do Player -->
                 <div style="background: rgba(30,30,45,0.9); border-radius: 12px; padding: 10px 16px; box-sizing: border-box;">
                   <!-- Todos os controles na mesma linha -->
@@ -1192,21 +1449,21 @@ class ClickCallManager {
                     " onmouseover="this.style.background='rgba(123,0,81,1)'" onmouseout="this.style.background='rgba(123,0,81,0.8)'">
                       ▶
                     </button>
-                    
+
                     <!-- Barra de Progresso e Tempo -->
                     <div style="flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 6px;">
                       <!-- Barra de Progresso -->
                       <div style="position: relative; width: 100%; height: 6px; background: rgba(255,255,255,0.2); border-radius: 3px; cursor: pointer;" onclick="seekAudio(event, ${index})" id="progress-container-${index}">
                         <div id="progress-bar-${index}" style="height: 100%; background: rgba(123,0,81,0.8); border-radius: 3px; width: 0%; transition: width 0.1s;"></div>
                       </div>
-                      
+
                       <!-- Tempo -->
                       <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: #bbb;">
                         <span id="current-time-${index}">0:00</span>
                         <span id="duration-${index}">0:00</span>
                       </div>
                     </div>
-                    
+
                     <!-- Volume Horizontal -->
                     <div class="volume-control-container" style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
                       <span style="color: #bbb; font-size: 0.85rem;">🔊</span>
@@ -1216,7 +1473,7 @@ class ClickCallManager {
                              oninput="setVolume(${index}, this.value)">
                       <span id="volume-text-${index}" class="volume-text" style="color: #bbb; font-size: 0.75rem; min-width: 35px;">100%</span>
                     </div>
-                    
+
                     <!-- Velocidade -->
                     <div style="display: flex; align-items: center; flex-shrink: 0;">
                       <select id="speed-${index}" onchange="setSpeed(${index}, this.value)" style="
@@ -1246,9 +1503,9 @@ class ClickCallManager {
                 </div>
               `}
             </div>
-            
+
             <!-- Área de Transcrição -->
-            <div style="
+            <div id="transcricao-${index}" style="
               width: 100%;
               max-width: 100%;
               box-sizing: border-box;
@@ -1260,17 +1517,106 @@ class ClickCallManager {
               overflow: hidden;
               word-wrap: break-word;
               overflow-wrap: break-word;
+              margin-top: 16px;
             ">
-              <div style="color: #999; font-size: 0.9rem; text-align: center; line-height: 1.6; word-wrap: break-word; overflow-wrap: break-word; max-width: 100%;">
-                Transcrição será exibida aqui<br>
-                <span style="font-size: 0.85rem; color: #777;">(A implementar)</span>
-              </div>
+              ${this.transcriptions[gravacao.codigo] ? `
+                <!-- Transcrição existente -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                  <div style="color: #c8007e; font-size: 0.9rem; font-weight: 600;">
+                    📝 Transcrição (${this.transcriptions[gravacao.codigo].provider === 'openai' ? 'OpenAI' : 'Gemini'})
+                  </div>
+                  <button 
+                    onclick="copiarTranscricao('${this.escapeHtml(gravacao.codigo || '')}', ${index}, event)"
+                    style="
+                      background: rgba(123,0,81,0.8);
+                      color: #fff;
+                      border: none;
+                      border-radius: 8px;
+                      padding: 6px 12px;
+                      font-size: 0.85rem;
+                      cursor: pointer;
+                      transition: background 0.2s;
+                    "
+                    onmouseover="this.style.background='rgba(123,0,81,1)'"
+                    onmouseout="this.style.background='rgba(123,0,81,0.8)'"
+                    title="Copiar transcrição"
+                  >
+                    📋 Copiar
+                  </button>
+                </div>
+                <div style="
+                  color: #fff;
+                  font-size: 0.95rem;
+                  line-height: 1.6;
+                  text-align: left;
+                  background: rgba(255,255,255,0.05);
+                  padding: 12px;
+                  border-radius: 8px;
+                  white-space: pre-wrap;
+                  word-wrap: break-word;
+                  overflow-wrap: break-word;
+                  max-height: 300px;
+                  overflow-y: auto;
+                ">${this.escapeHtml(this.transcriptions[gravacao.codigo].texto)}</div>
+                <div style="
+                  color: #999;
+                  font-size: 0.8rem;
+                  margin-top: 8px;
+                  text-align: right;
+                ">
+                  Tempo de processamento: ${this.transcriptions[gravacao.codigo].duration.toFixed(2)}s
+                </div>
+              ` : this.transcribing[gravacao.codigo] ? `
+                <!-- Loading -->
+                <div style="color: #c8007e; font-size: 0.95rem; text-align: center; padding: 20px;">
+                  <div style="display: inline-block; animation: spin 1s linear infinite; font-size: 1.5rem; margin-bottom: 8px;">⏳</div>
+                  <div>Transcrevendo áudio...</div>
+                  <div style="font-size: 0.85rem; color: #999; margin-top: 8px;">Isso pode levar alguns segundos</div>
+                </div>
+                <style>
+                  @keyframes spin {
+                    from { transform: rotate(0deg); }
+                    to { transform: rotate(360deg); }
+                  }
+                </style>
+              ` : `
+                <!-- Botão para transcrever -->
+                <div style="text-align: center; padding: 20px;">
+                  <div style="color: #999; font-size: 0.9rem; margin-bottom: 12px;">
+                    Clique no botão para transcrever o áudio
+                  </div>
+                  <button 
+                    data-codigo="${this.escapeHtml(gravacao.codigo || '')}"
+                    data-index="${index}"
+                    data-company-id="${this.escapeHtml(gravacao.company_id || '100')}"
+                    data-calldate="${this.escapeHtml(gravacao.calldate || '')}"
+                    onclick="window.clickCallManager.transcreverAudioPorButton(this)"
+                    style="
+                      background: linear-gradient(90deg, #7b0051 60%, #c8007e 100%);
+                      color: #fff;
+                      border: none;
+                      border-radius: 12px;
+                      padding: 12px 24px;
+                      font-size: 1rem;
+                      font-weight: 600;
+                      cursor: pointer;
+                      transition: transform 0.2s, box-shadow 0.2s;
+                      box-shadow: 0 2px 8px rgba(123,0,81,0.3);
+                    "
+                    onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 4px 12px rgba(123,0,81,0.5)'"
+                    onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 2px 8px rgba(123,0,81,0.3)'"
+                    title="Transcrever áudio usando IA"
+                  >
+                    🎙️ Transcrever Áudio
+                  </button>
+                </div>
+              `}
             </div>
           </div>
         `;
       }).join('');
     }
-    
+
     modal.innerHTML = `
       <div class="modal-confirm" style="
         width: 100%;
@@ -1303,12 +1649,12 @@ class ClickCallManager {
           <strong>Contato:</strong> ${nomeContato}<br>
           <strong>Telefone:</strong> ${telefoneContato}
         </div>
-        
+
         <!-- Lista de Gravações -->
         <div style="width: 100%; max-width: 100%; box-sizing: border-box; margin-bottom: 24px; scrollbar-width: none; -ms-overflow-style: none; overflow-x: hidden;" id="gravacoes-container">
           ${gravacoesHTML}
         </div>
-        
+
         <button id="close-modal-gravacao" class="modal-btn-confirm" style="
           width: 220px;
           font-size: 1.2rem;
@@ -1335,10 +1681,9 @@ class ClickCallManager {
         ">&times;</button>
       </div>
     `;
-    
+
     document.body.appendChild(modal);
-    
-    // Eventos de fechamento
+
     document.getElementById('close-modal-gravacao').onclick = function() {
       modal.remove();
     };
@@ -1348,8 +1693,7 @@ class ClickCallManager {
     modal.onclick = function(e) {
       if (e.target === modal) modal.remove();
     };
-    
-    // Responsividade
+
     function resizeModal() {
       const modalBox = modal.querySelector('.modal-confirm');
       if (!modalBox) return;
@@ -1360,27 +1704,23 @@ class ClickCallManager {
     }
     resizeModal();
     window.addEventListener('resize', resizeModal);
-    
-    // Limpa o listener quando o modal for removido
+
     const originalRemove = modal.remove;
     modal.remove = function() {
       window.removeEventListener('resize', resizeModal);
       originalRemove.call(this);
     };
-    
-    // Inicializar players de áudio simples após o modal ser criado
+
     setTimeout(() => {
       const audioPlayers = modal.querySelectorAll('audio');
-      
+
       audioPlayers.forEach((audioElement, index) => {
         try {
           const audioId = audioElement.id;
           const playerIndex = index;
-          
-          // Carregar metadados
+
           audioElement.load();
-          
-          // Event listeners para atualizar UI
+
           audioElement.addEventListener('loadedmetadata', () => {
             const duration = audioElement.duration || 0;
             const durationEl = document.getElementById(`duration-${playerIndex}`);
@@ -1388,37 +1728,35 @@ class ClickCallManager {
               durationEl.textContent = formatTime(duration);
             }
           });
-          
+
           audioElement.addEventListener('timeupdate', () => {
             updateProgress(playerIndex);
           });
-          
+
           audioElement.addEventListener('play', () => {
             const btn = document.getElementById(`play-pause-btn-${playerIndex}`);
             if (btn) btn.innerHTML = '⏸';
           });
-          
+
           audioElement.addEventListener('pause', () => {
             const btn = document.getElementById(`play-pause-btn-${playerIndex}`);
             if (btn) btn.innerHTML = '▶';
           });
-          
+
           audioElement.addEventListener('ended', () => {
             const btn = document.getElementById(`play-pause-btn-${playerIndex}`);
             if (btn) btn.innerHTML = '▶';
           });
-          
+
           audioElement.addEventListener('error', (e) => {
             console.error(`[showRecordingModal] ❌ Player ${playerIndex + 1} - Erro:`, audioElement.error);
           });
-          
-          // Atualizar volume inicial
+
           const volumeInput = document.getElementById(`volume-${playerIndex}`);
           if (volumeInput) {
             audioElement.volume = parseFloat(volumeInput.value);
           }
-          
-          
+
         } catch (error) {
           console.error(`[showRecordingModal] ❌ Erro ao inicializar player simples ${index + 1}:`, error);
         }
@@ -1426,22 +1764,20 @@ class ClickCallManager {
     }, 100);
   }
 
-  // Processa dados do webhook e adiciona gravação ao contato
   processWebhookData(body) {
-    
+
     if (!body) {
       console.error('[processWebhookData] ERRO: Body vazio ou undefined!');
       this.showError('Dados do webhook estão vazios.');
       return;
     }
-    
+
     try {
       let calldate, src, dst, duration, billsec, disposition, userfield, price, company_id, accountcode, url, callid;
-      
-      // Detectar se é objeto JSON (dados processados do n8n) ou string URL-encoded (dados brutos)
+
       if (typeof body === 'object' && !Array.isArray(body) && body !== null) {
-        // Dados processados do n8n (JSON)
-        calldate = body.calldate || '';
+
+        calldate = body.calldate || body.call_date || body.date || '';
         src = body.src || '';
         dst = body.dst || '';
         duration = body.duration || '0';
@@ -1453,19 +1789,26 @@ class ClickCallManager {
         accountcode = body.accountcode || '';
         callid = body.callid || ''; // CallID do contato (nome)
         url = body.url || ''; // URL já processada pelo n8n
-        
+
+        console.log('[processWebhookData] Dados recebidos (JSON):', {
+          calldate: calldate,
+          bodyKeys: Object.keys(body),
+          bodyCalldate: body.calldate,
+          bodyCall_date: body.call_date,
+          bodyDate: body.date
+        });
+
       } else if (typeof body === 'string') {
-        // Dados brutos do Delorean (URL-encoded)
+
         if (body.trim() === '') {
           console.error('[processWebhookData] ERRO: Body vazio!');
           this.showError('Dados do webhook estão vazios.');
           return;
         }
-        
+
         const params = new URLSearchParams(body);
-        
-        // Extrair todos os campos
-        calldate = params.get('calldate') || '';
+
+        calldate = params.get('calldate') || params.get('call_date') || params.get('date') || '';
         src = params.get('src') || ''; // ramal
         dst = params.get('dst') || ''; // telefone (sem formatação)
         duration = params.get('duration') || '0';
@@ -1476,46 +1819,44 @@ class ClickCallManager {
         company_id = params.get('company_id') || '';
         accountcode = params.get('accountcode') || '';
         callid = params.get('callid') || ''; // CallID do contato (nome)
-        
-        // Construir URL da gravação manualmente (fallback)
+
         url = userfield ? `https://delorean.krolik.com.br/services/record/${userfield}` : '';
+
+        console.log('[processWebhookData] Dados recebidos (String):', {
+          calldate: calldate,
+          paramsKeys: Array.from(params.keys()),
+          paramCalldate: params.get('calldate'),
+          paramCall_date: params.get('call_date'),
+          paramDate: params.get('date')
+        });
       } else {
         console.error('[processWebhookData] ERRO: Formato de dados não reconhecido!');
         console.error('[processWebhookData] Tipo recebido:', typeof body);
         this.showError('Formato de dados do webhook não reconhecido.');
         return;
       }
-      
 
-      // Validar campos obrigatórios
-      if (!src || !dst || !userfield) {
+      if (!src || !dst) {
         console.error('[processWebhookData] ERRO: Campos obrigatórios faltando!');
         console.error('  - src presente?', !!src, 'Valor:', src);
         console.error('  - dst presente?', !!dst, 'Valor:', dst);
-        console.error('  - userfield presente?', !!userfield, 'Valor:', userfield);
         this.showWarning('Webhook recebido com dados incompletos. Verifique o console.');
         return;
       }
-      
 
-      // Formatar telefone para match (remover formatação, apenas números)
       const telefoneFormatado = dst.replace(/\D/g, '');
       const srcString = src ? src.toString() : '';
-      
+
       const contatoIndex = this.contacts.findIndex((c, idx) => {
         const ramalContato = c.ramal ? c.ramal.toString() : '';
         const numeroContato = c.numero ? c.numero.toString().replace(/\D/g, '') : '';
-        
-        // Match de ramal: pode ser exato OU o ramal do contato pode terminar com o src do webhook
-        // (ex: contato tem "1003029", webhook tem "3029")
+
         const ramalMatchExato = ramalContato === srcString;
         const ramalMatchSufixo = ramalContato.endsWith(srcString) && srcString !== '';
         const ramalMatch = ramalMatchExato || ramalMatchSufixo;
-        
-        // Match de telefone: compara apenas números
+
         const numeroMatch = numeroContato === telefoneFormatado;
-        
-        
+
         return ramalMatch && numeroMatch;
       });
 
@@ -1529,19 +1870,15 @@ class ClickCallManager {
         this.showWarning(`Nenhum contato encontrado para ramal ${src} e telefone ${dst}. A gravação não foi vinculada.`);
         return;
       }
-      
+
       const contatoEncontrado = this.contacts[contatoIndex];
 
-      // Usar URL já processada pelo n8n ou construir manualmente se não disponível
       if (!url && userfield) {
         url = `https://delorean.krolik.com.br/services/record/${userfield}`;
       }
 
-      // Status da ligação: sempre "Atendida" se há gravação
-      // Pois não haveria gravação se a ligação não fosse atendida
       const dispositionNormalizado = 'Atendida';
-      
-      // Criar objeto de gravação
+
       const gravacao = {
         codigo: userfield,
         calldate: calldate || '',
@@ -1556,26 +1893,31 @@ class ClickCallManager {
         company_id: company_id || '',
         accountcode: accountcode || ''
       };
-      
-      // Adicionar gravação ao contato (no início do array para manter ordem mais recente primeiro)
+
+      console.log('[processWebhookData] Objeto de gravação criado:', {
+        codigo: gravacao.codigo,
+        calldate: gravacao.calldate,
+        calldateTipo: typeof gravacao.calldate,
+        calldateVazio: !gravacao.calldate || gravacao.calldate === ''
+      });
+
       if (!this.contacts[contatoIndex].gravacoes) {
         this.contacts[contatoIndex].gravacoes = [];
       }
-      
-      // Verificar se já existe gravação com o mesmo código (evitar duplicatas)
+
       const existeGravacao = this.contacts[contatoIndex].gravacoes.some(g => g.codigo === userfield);
-      
+
       if (!existeGravacao) {
         this.contacts[contatoIndex].gravacoes.unshift(gravacao); // Adiciona no início
-        
+
         try {
           this.saveContactsToStorage();
-          // Atualizar apenas o ícone de gravação na linha específica (não re-renderizar toda a tabela)
+
           this.updateRecordingIcon(contatoIndex);
         } catch (saveError) {
           console.error('[processWebhookData] ERRO ao salvar no localStorage:', saveError);
         }
-        
+
         const nomeContato = this.contacts[contatoIndex].contato || 'Contato sem nome';
         this.showSuccess(`Gravação adicionada ao contato: ${nomeContato}`);
       } else {
@@ -1587,20 +1929,18 @@ class ClickCallManager {
     }
   }
 
-  // Recebe requisição de webhook (pode ser chamada via fetch ou manualmente)
   handleWebhookRequest(body) {
-    
+
     if (!body) {
       console.error('[handleWebhookRequest] ERRO: Body vazio ou undefined!');
       this.showError('Webhook recebido sem dados. Body está vazio.');
       return;
     }
-    
-    // Se body for um objeto Event (de um fetch), extrair o body
+
     if (typeof body === 'string') {
       this.processWebhookData(body);
     } else if (body && body.formData) {
-      // Se for FormData, converter para string URL-encoded
+
       const formData = body.formData;
       const params = new URLSearchParams();
       for (const [key, value] of formData.entries()) {
@@ -1609,12 +1949,12 @@ class ClickCallManager {
       const formDataString = params.toString();
       this.processWebhookData(formDataString);
     } else if (body && typeof body === 'object' && !Array.isArray(body)) {
-      // Objeto JSON - pode ser dados processados do n8n (com url pronta) ou objeto a ser convertido
+
       if (body.url) {
-        // Passar objeto diretamente - processWebhookData já trata objetos JSON
+
         this.processWebhookData(body);
       } else {
-        // Objeto sem URL - converter para URL-encoded (compatibilidade com código antigo)
+
         const params = new URLSearchParams();
         for (const [key, value] of Object.entries(body)) {
           params.append(key, value);
@@ -1628,23 +1968,19 @@ class ClickCallManager {
     }
   }
 
-  // Função para testar webhook manualmente (útil para testes)
   testWebhook(testData) {
-    // Exemplo de uso:
-    // window.clickCallManager.testWebhook('calldate=2025-10-29+11%3A29%3A03&src=1001099&dst=16981317956&duration=15&billsec=12&disposition=ANSWERED&userfield=20251029_112915_1001099_103_16981317956_1761748146&price=0.105&company_id=100&accountcode=5.00');
+
     if (!testData) {
-      // Exemplo padrão para teste
+
       testData = 'calldate=2025-10-29+11%3A29%3A03&src=1001099&dst=16981317956&duration=15&billsec=12&disposition=ANSWERED&userfield=20251029_112915_1001099_103_16981317956_1761748146&price=0.105&company_id=100&accountcode=5.00';
     }
     this.handleWebhookRequest(testData);
   }
 
-  // Configurar listener para webhook (pode ser chamado via fetch ou evento customizado)
   setupWebhookListener() {
-    
-    // Expor função global para receber webhooks externos
+
     window.receberWebhook = (body) => {
-      
+
       if (this && typeof this.handleWebhookRequest === 'function') {
         this.handleWebhookRequest(body);
       } else {
@@ -1653,11 +1989,9 @@ class ClickCallManager {
         console.error('[setupWebhookListener] typeof this:', typeof this);
       }
     };
-    
 
-    // Listener para eventos customizados (útil para integração)
     window.addEventListener('webhook-received', (event) => {
-      
+
       if (event.detail && event.detail.body) {
         this.handleWebhookRequest(event.detail.body);
       } else {
@@ -1665,54 +1999,46 @@ class ClickCallManager {
         console.error('[setupWebhookListener] event.detail:', event.detail);
       }
     });
-    
+
   }
 
-  // Iniciar polling de webhooks do backend
   startWebhookPolling() {
-    // Proteção: se já existe um polling ativo, parar antes de iniciar um novo
+
     if (this.webhookPollingIntervalId) {
       clearInterval(this.webhookPollingIntervalId);
       this.webhookPollingIntervalId = null;
     }
-    
-    // URL do backend (ajuste conforme necessário)
+
     const webhookServerUrl = this.webhookServerUrl || 'http://localhost:4201';
     const pollingInterval = this.webhookPollingInterval || 5000; // 5 segundos por padrão
-    
-    
+
     let lastWebhookTimestamp = null;
-    
-    // Função para buscar webhook
+
     const fetchWebhook = async () => {
       try {
         const url = `${webhookServerUrl}/api/get-latest-webhook`;
-        
+
         const response = await fetch(url, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json'
           }
         });
-        
+
         if (!response.ok) {
           return;
         }
-        
+
         const result = await response.json();
-        
-        // Se tem dados e é um webhook novo (timestamp diferente)
-        
+
         if (result.success && result.data && result.timestamp !== lastWebhookTimestamp) {
-          
+
           lastWebhookTimestamp = result.timestamp;
-          
-          // Detectar tipo de dados baseado no source
+
           let dataToProcess = result.data;
-          
+
           if (result.source === 'n8n_processed') {
-            // Dados processados do n8n (JSON) - passar como objeto
-            
+
             if (typeof dataToProcess === 'string') {
               try {
                 dataToProcess = JSON.parse(dataToProcess);
@@ -1722,9 +2048,9 @@ class ClickCallManager {
             } else if (typeof dataToProcess === 'object') {
             }
           } else if (result.source === 'delorean_raw') {
-            // Dados brutos do Delorean (URL-encoded) - passar como string
+
             if (typeof dataToProcess === 'object') {
-              // Converter objeto para URL-encoded se necessário
+
               const params = new URLSearchParams();
               Object.keys(dataToProcess).forEach(key => {
                 params.append(key, dataToProcess[key]);
@@ -1732,25 +2058,22 @@ class ClickCallManager {
               dataToProcess = params.toString();
             }
           }
-          
-          // Log do dado final a ser processado
+
           if (typeof dataToProcess === 'object') {
           }
-          
-          // Processar webhook recebido
+
           if (typeof this.handleWebhookRequest === 'function') {
             this.handleWebhookRequest(dataToProcess);
           } else {
             console.error('[startWebhookPolling] ❌ ERRO: handleWebhookRequest não está disponível!');
           }
         } else if (!result.success) {
-          // Log apenas se não for "nenhum webhook ainda"
+
           if (result.message !== 'Nenhum webhook recebido ainda') {
           }
         }
       } catch (error) {
-        // Não logar erro de conexão a cada tentativa (muito spam)
-        // Só logar uma vez a cada 10 tentativas ou se for primeiro erro
+
         if (!this._webhookConnectionErrorLogged) {
           console.warn('[startWebhookPolling] ⚠️  Servidor de webhook não acessível. Verifique se o backend está rodando.');
           console.warn('[startWebhookPolling] URL tentada:', webhookServerUrl);
@@ -1759,16 +2082,13 @@ class ClickCallManager {
         }
       }
     };
-    
-    // Buscar imediatamente na inicialização
+
     fetchWebhook();
-    
-    // Configurar intervalo de polling
+
     this.webhookPollingIntervalId = setInterval(fetchWebhook, pollingInterval);
-    
+
   }
 
-  // Parar polling de webhooks (útil para cleanup)
   stopWebhookPolling() {
     if (this.webhookPollingIntervalId) {
       clearInterval(this.webhookPollingIntervalId);
@@ -1776,7 +2096,6 @@ class ClickCallManager {
     }
   }
 
-  // Manipula o upload de arquivo
   async handleFileUpload(event) {
     const file = event.target.files[0];
     if (!file) {
@@ -1791,7 +2110,7 @@ class ClickCallManager {
       this.showLoading('Processando arquivo...');
       const contacts = await this.processFile(file);
       const hash = JSON.stringify(contacts);
-      // Só verifica duplicidade se já houver contatos salvos
+
       if (this.contacts && this.contacts.length > 0 && this._lastImportHash) {
         if (this._lastImportHash === hash && this._lastImportFileName === file.name) {
           this.hideLoading();
@@ -1818,7 +2137,6 @@ class ClickCallManager {
     }
   }
 
-  // Valida o tipo do arquivo importado
   isValidFileType(file) {
     const validTypes = [
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -1828,7 +2146,6 @@ class ClickCallManager {
     return validTypes.includes(file.type) || file.name.endsWith('.xlsx') || file.name.endsWith('.csv');
   }
 
-  // Processa o arquivo Excel/CSV importado
   async processFile(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -1855,11 +2172,10 @@ class ClickCallManager {
     });
   }
 
-  // Normaliza os dados dos contatos importados
   normalizeContacts(contacts) {
-    // Mapeia os campos para o formato interno usado pelo sistema
+
     return contacts.map((contact, index) => {
-      // Função auxiliar para buscar valor em múltiplas chaves possíveis
+
       const getValue = (keys) => {
         for (let key of keys) {
           if (contact[key] !== undefined && contact[key] !== null && contact[key] !== '') {
@@ -1871,22 +2187,21 @@ class ClickCallManager {
 
       const cpfOriginal = getValue(['CPF / CNPJ', 'CPF', 'cpf', 'CNPJ', 'cnpj']);
       let cpfFormatado = '';
-      
+
       if (cpfOriginal) {
         cpfFormatado = formatarCpfCnpj(cpfOriginal);
-        
-        // Só formata se tiver 11 dígitos e for um CPF válido
+
         if (cpfOriginal.replace(/\D/g, '').length === 11 && validarCpfCnpj(cpfOriginal)) {
           if (cpfOriginal !== cpfFormatado) {
           }
         } else {
-          // Se não é um CPF válido, mantém como está mas adiciona log
+
           cpfFormatado = cpfOriginal;
           if (cpfOriginal.replace(/\D/g, '').length > 0) {
           }
         }
       }
-      
+
       const normalized = {
         contato: getValue(['CONTATO', 'contato', 'Contato', 'NOME', 'Nome', 'nome', 'PESSOA', 'Pessoa', 'pessoa', 'CLIENTE', 'Cliente', 'cliente']),
         cpf: cpfFormatado,
@@ -1897,7 +2212,6 @@ class ClickCallManager {
         gravacoes: [] // Inicializa array de gravações vazio
       };
 
-      // Verifica se "JÁ LIGUEI" está marcado
       const jaLiguei = getValue(['JÁ LIGUEI', 'já liguei', 'JÁ LIGUEI', 'done', 'Done', 'DONE']);
       if (jaLiguei) {
         normalized.done = jaLiguei.toString().toLowerCase() === 'sim' || 
@@ -1908,11 +2222,11 @@ class ClickCallManager {
 
       return normalized;
     }).filter(contact => {
-      // Deve ter pelo menos um dos campos: contato, ramal ou numero
+
       const temContato = contact.contato && contact.contato.toString().trim() !== '';
       const temRamal = contact.ramal && contact.ramal.toString().trim() !== '';
       const temNumero = contact.numero && contact.numero.toString().trim() !== '';
-      
+
       const valido = temContato || temRamal || temNumero;
       if (!valido) {
       }
@@ -1920,7 +2234,6 @@ class ClickCallManager {
     });
   }
 
-  // Exibe os contatos na tabela
   displayContacts(contacts) {
     const tbody = this.contactsTable.querySelector('tbody');
     if (!tbody) throw new Error('Elemento tbody não encontrado');
@@ -1943,24 +2256,20 @@ class ClickCallManager {
     this.renderPagination(totalPages);
   }
 
-  // Atualiza apenas o ícone de gravação na linha específica do contato
-  // Evita re-renderizar toda a tabela, mantendo o estado da página
   updateRecordingIcon(contatoIndex) {
     const tbody = this.contactsTable.querySelector('tbody');
     if (!tbody) return;
-    
+
     const contact = this.contacts[contatoIndex];
     if (!contact) return;
-    
-    // Calcular em qual página o contato está
+
     const total = this.contacts.length;
     const contactsPerPage = this.contactsPerPage;
-    
-    // Encontrar a página e índice dentro da página
+
     let pageIndex = -1;
     let pageNum = 1;
     let currentCount = 0;
-    
+
     for (let i = 0; i < this.contacts.length; i++) {
       if (i === contatoIndex) {
         pageIndex = currentCount;
@@ -1972,27 +2281,25 @@ class ClickCallManager {
         currentCount = 0;
       }
     }
-    
-    // Se o contato não está na página atual, não precisa atualizar nada
+
     if (pageNum !== this.currentPage) {
       return;
     }
-    
-    // Encontrar a linha na tabela (linhas são criadas na ordem de exibição)
+
     const rows = tbody.querySelectorAll('tr');
     if (pageIndex >= 0 && pageIndex < rows.length) {
       const row = rows[pageIndex];
       const gravarCell = row.querySelector('.td-gravacao');
-      
+
       if (gravarCell) {
-        // Verificar se o contato tem gravações (mesma lógica de createContactRow)
+
         const temContato = contact.contato && contact.contato.trim() !== '';
         const hasRecordings = contact.gravacoes && contact.gravacoes.length > 0;
-        
+
         if (temContato && hasRecordings) {
-          // Se já tem o botão de gravação, não precisa fazer nada
+
           if (!gravarCell.querySelector('.gravar-btn')) {
-            // Criar botão de gravação
+
             const btn = document.createElement('button');
             btn.className = 'gravar-btn';
             btn.title = 'Ver gravações';
@@ -2002,7 +2309,7 @@ class ClickCallManager {
             gravarCell.appendChild(btn);
           }
         } else {
-          // Se não tem gravações ou não tem nome, mostrar apenas traço
+
           if (gravarCell.querySelector('.gravar-btn')) {
             gravarCell.innerHTML = '<span style="color: #ccc; font-size: 0.9rem;">—</span>';
           }
@@ -2011,7 +2318,6 @@ class ClickCallManager {
     }
   }
 
-  // Manipula a exclusão de um contato
   handleDeleteContact(index) {
     const contato = this.contacts[index];
     const nome = contato && contato.contato ? ` (${contato.contato})` : '';
@@ -2026,10 +2332,9 @@ class ClickCallManager {
     });
   }
 
-  // Exibe opções de importação ao importar contatos
   showImportOptions(importedContacts) {
     if (!this.contacts || this.contacts.length === 0) {
-      // Não há contatos salvos, importa direto
+
       this.replaceContacts(importedContacts);
       return;
     }
@@ -2065,18 +2370,16 @@ class ClickCallManager {
     };
   }
 
-  // Mescla contatos importados sem duplicar ramais
   mergeContacts(importedContacts) {
-    
+
     const ramaisExistentes = new Set(this.contacts.map(c => c.ramal).filter(r => r));
-    
+
     const novos = importedContacts.filter(c => {
       const temRamal = c.ramal && c.ramal.toString().trim() !== '';
       const ramalNovo = !ramaisExistentes.has(c.ramal);
       return temRamal && ramalNovo;
     });
-    
-    
+
     this.contacts = [...this.contacts, ...novos];
     this.saveContactsToStorage();
     this.currentPage = 1;
@@ -2084,9 +2387,8 @@ class ClickCallManager {
     this.showSuccess(`${novos.length} contatos importados e mesclados com sucesso!`);
   }
 
-  // Substitui todos os contatos pelos importados
   replaceContacts(importedContacts) {
-    
+
     this.contacts = importedContacts;
     this.saveContactsToStorage();
     this.currentPage = 1;
@@ -2094,29 +2396,27 @@ class ClickCallManager {
     this.showSuccess(`${importedContacts.length} contatos substituídos com sucesso!`);
   }
 
-  // Edição de contato
   handleEditContact(tr, contact, index) {
     if (tr.classList.contains('edit-mode')) return;
     tr.classList.add('edit-mode');
-    // Salva valores atuais
+
     const CONTATO = contact.contato || '';
     const CPF = contact.cpf || '';
     const RAMAL = contact.ramal || '';
     const TELEFONE = contact.numero || '';
-    // Substitui células por inputs
+
     tr.querySelector('.td-contato').innerHTML = `<input type='text' value='${this.escapeHtml(CONTATO)}' style='width:100%'>`;
     tr.querySelector('.td-cpf').innerHTML = `<input type='text' value='${this.escapeHtml(CPF)}' maxlength='18' style='width:100%'>`;
     tr.querySelector('.td-ramal').innerHTML = `<input type='text' value='${this.escapeHtml(RAMAL)}' style='width:100%'>`;
     tr.querySelector('.td-numero').innerHTML = `<input type='text' value='${this.escapeHtml(TELEFONE)}' style='width:100%'>`;
-    // Observação já é editável inline
-    // Substitui toda a coluna Ação por Salvar/Cancelar
+
     const tdAcao = tr.querySelector('.td-acao');
     tdAcao.innerHTML = '';
     const btnSalvar = this.createButton('Salvar', 'save-btn');
     const btnCancelar = this.createButton('Cancelar', 'cancel-btn');
     tdAcao.appendChild(btnSalvar);
     tdAcao.appendChild(btnCancelar);
-    // Máscara dinâmica para CPF
+
     const cpfInput = tr.querySelector('.td-cpf input');
     cpfInput.addEventListener('input', function() {
       this.value = formatarCpfCnpj(this.value);
@@ -2156,23 +2456,22 @@ class ClickCallManager {
 
 }
 
-// Função utilitária para formatar CPF ou CNPJ automaticamente
 function formatarCpfCnpj(valor) {
   if (!valor) return '';
   valor = valor.toString().replace(/\D/g, '');
   if (valor.length <= 11) {
-    // CPF
+
     if (valor.length === 11) {
       return valor.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
     }
     return valor;
   } else {
-    // CNPJ
+
     valor = valor.substring(0, 14); // Limita a 14 dígitos
     return valor.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
   }
 }
-// Função utilitária para validar CPF
+
 function validarCPF(cpf) {
   cpf = cpf.replace(/\D/g, '');
   if (cpf.length !== 11 || /^([0-9])\1+$/.test(cpf)) return false;
@@ -2189,7 +2488,6 @@ function validarCPF(cpf) {
   return true;
 }
 
-// Função utilitária para validar CNPJ
 function validarCNPJ(cnpj) {
   cnpj = cnpj.replace(/\D/g, '');
   if (cnpj.length !== 14) return false;
@@ -2217,36 +2515,33 @@ function validarCNPJ(cnpj) {
   if (resultado != digitos.charAt(1)) return false;
   return true;
 }
-// Função para validar CPF ou CNPJ automaticamente (apenas quantidade de dígitos)
+
 function validarCpfCnpj(valor) {
   valor = valor.replace(/\D/g, '');
   if (valor.length === 11) return true; // Aceita qualquer CPF com 11 dígitos
   if (valor.length === 14) return true; // Aceita qualquer CNPJ com 14 dígitos
   return false;
 }
-// Função utilitária para formatar número para visualização: (16) 98189-2476
+
 function formatarNumeroVisual(numero) {
   if (!numero) return '';
   const num = numero.toString().replace(/\D/g, '');
   if (num.length === 11) {
-    // Celular com DDD
+
     return `(${num.substr(0,2)}) ${num.substr(2,5)}-${num.substr(7,4)}`;
   } else if (num.length === 10) {
-    // Fixo com DDD
+
     return `(${num.substr(0,2)}) ${num.substr(2,4)}-${num.substr(6,4)}`;
   } else if (num.length === 9) {
-    // Celular sem DDD
+
     return `${num.substr(0,5)}-${num.substr(5,4)}`;
   } else if (num.length === 8) {
-    // Fixo sem DDD
+
     return `${num.substr(0,4)}-${num.substr(4,4)}`;
   }
   return numero; // Retorna como está se não bater nenhum padrão
 }
 
-// Funções globais para o player de áudio simples
-
-// Formatar tempo (segundos) para formato MM:SS
 function formatTime(seconds) {
   if (!seconds || isNaN(seconds) || !isFinite(seconds)) return '0:00';
   const mins = Math.floor(seconds / 60);
@@ -2254,14 +2549,13 @@ function formatTime(seconds) {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-// Toggle play/pause
 function togglePlayPause(index) {
   const audio = document.getElementById(`audio-player-${index}`);
   if (!audio) {
     console.error(`[togglePlayPause] Áudio ${index} não encontrado`);
     return;
   }
-  
+
   if (audio.paused) {
     audio.play().catch(err => {
       console.error(`[togglePlayPause] Erro ao reproduzir áudio:`, err);
@@ -2271,122 +2565,104 @@ function togglePlayPause(index) {
   }
 }
 
-// Atualizar barra de progresso
 function updateProgress(index) {
   const audio = document.getElementById(`audio-player-${index}`);
   if (!audio) return;
-  
+
   const currentTime = audio.currentTime || 0;
   const duration = audio.duration || 0;
-  
-  // Atualizar barra
+
   const progressBar = document.getElementById(`progress-bar-${index}`);
   if (progressBar && duration > 0) {
     const percent = (currentTime / duration) * 100;
     progressBar.style.width = percent + '%';
   }
-  
-  // Atualizar tempo atual
+
   const currentTimeEl = document.getElementById(`current-time-${index}`);
   if (currentTimeEl) {
     currentTimeEl.textContent = formatTime(currentTime);
   }
 }
 
-// Seek (pular para posição específica)
 function seekAudio(event, index) {
   const audio = document.getElementById(`audio-player-${index}`);
   const container = document.getElementById(`progress-container-${index}`);
   if (!audio || !container) return;
-  
+
   const rect = container.getBoundingClientRect();
   const x = event.clientX - rect.left;
   const percent = x / rect.width;
   const duration = audio.duration || 0;
-  
+
   if (duration > 0) {
     audio.currentTime = percent * duration;
     updateProgress(index);
   }
 }
 
-// Ajustar volume
 function setVolume(index, value) {
   const audio = document.getElementById(`audio-player-${index}`);
   if (!audio) return;
-  
+
   const volume = parseFloat(value);
   audio.volume = volume;
-  
-  // Atualizar texto de volume
+
   const volumeText = document.getElementById(`volume-text-${index}`);
   if (volumeText) {
     volumeText.textContent = Math.round(volume * 100) + '%';
   }
 }
 
-// Ajustar velocidade
 function setSpeed(index, value) {
   const audio = document.getElementById(`audio-player-${index}`);
   if (!audio) return;
-  
+
   const speed = parseFloat(value);
   audio.playbackRate = speed;
 }
 
-// Função global para download de áudio
 async function downloadAudio(url, filename) {
   try {
-    
-    // Mostrar notificação de carregamento
+
     if (window.clickCallManager && window.clickCallManager.showWarning) {
       window.clickCallManager.showWarning('Preparando download...');
     }
-    
-    // Buscar o arquivo usando fetch
+
     const response = await fetch(url, {
       method: 'GET',
       mode: 'cors',
       cache: 'no-cache'
     });
-    
+
     if (!response.ok) {
       throw new Error(`Erro ao buscar arquivo: ${response.status} ${response.statusText}`);
     }
-    
-    // Converter resposta para Blob
+
     const blob = await response.blob();
-    
-    // Criar URL temporária do Blob
+
     const blobUrl = window.URL.createObjectURL(blob);
-    
-    // Criar link temporário para download
+
     const link = document.createElement('a');
     link.href = blobUrl;
     link.download = filename;
     link.style.display = 'none';
-    
-    // Adicionar ao DOM temporariamente
+
     document.body.appendChild(link);
-    
-    // Disparar clique para iniciar download
+
     link.click();
-    
-    // Limpar: remover link e revogar URL do Blob
+
     setTimeout(() => {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
     }, 100);
-    
-    // Notificar o usuário
+
     if (window.clickCallManager && window.clickCallManager.showSuccess) {
       window.clickCallManager.showSuccess(`Download iniciado: ${filename}`);
     }
-    
+
   } catch (error) {
     console.error('[downloadAudio] ❌ Erro ao fazer download:', error);
-    
-    // Tentar fallback: download direto (pode não funcionar por CORS)
+
     try {
       const link = document.createElement('a');
       link.href = url;
@@ -2396,16 +2672,15 @@ async function downloadAudio(url, filename) {
       document.body.appendChild(link);
       link.click();
       setTimeout(() => document.body.removeChild(link), 100);
-      
+
       if (window.clickCallManager && window.clickCallManager.showWarning) {
         window.clickCallManager.showWarning('Tentando método alternativo de download...');
       }
     } catch (fallbackError) {
       console.error('[downloadAudio] ❌ Fallback também falhou:', fallbackError);
-      
-      // Último recurso: abrir em nova aba
+
       window.open(url, '_blank');
-      
+
       if (window.clickCallManager && window.clickCallManager.showWarning) {
         window.clickCallManager.showWarning('Não foi possível iniciar o download automaticamente. Abrindo em nova aba... (Você pode fazer o download manualmente clicando com botão direito → Salvar como)');
       }
@@ -2413,12 +2688,46 @@ async function downloadAudio(url, filename) {
   }
 }
 
+function copiarTranscricao(codigo, index, event) {
+  const manager = window.clickCallManager;
+  if (!manager) {
+    console.error('[copiarTranscricao] clickCallManager não encontrado');
+    alert('❌ Erro: Sistema não inicializado');
+    return;
+  }
+
+  const transcricao = manager.transcriptions[codigo];
+
+  if (!transcricao) {
+    alert('❌ Transcrição não encontrada');
+    return;
+  }
+
+  navigator.clipboard.writeText(transcricao.texto).then(() => {
+
+    const button = event ? event.target : event.currentTarget;
+    if (button) {
+      const textoOriginal = button.innerHTML;
+      button.innerHTML = '✅ Copiado!';
+      button.style.background = 'rgba(0,255,0,0.8)';
+
+      setTimeout(() => {
+        button.innerHTML = textoOriginal;
+        button.style.background = 'rgba(123,0,81,0.8)';
+      }, 2000);
+    }
+  }).catch(err => {
+    console.error('[copiarTranscricao] Erro:', err);
+    alert('❌ Erro ao copiar transcrição. Tente selecionar o texto manualmente.');
+  });
+}
+
 function initializeClickCall() {
-  // Proteção: se já existe uma instância, parar polling anterior antes de criar nova
+
   if (window.clickCallManager && typeof window.clickCallManager.stopWebhookPolling === 'function') {
     window.clickCallManager.stopWebhookPolling();
   }
-  
+
   window.clickCallManager = new ClickCallManager();
 }
 

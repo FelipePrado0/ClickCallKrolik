@@ -16,6 +16,9 @@ const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const path = require('path');
+const https = require('https');
+const urlModule = require('url');
+const { transcreverAudio } = require('./transcription-service');
 
 const app = express();
 const PORT = process.env.PORT || 4201;
@@ -41,54 +44,52 @@ const retryQueue = [];
 const auditLog = [];
 
 // Middleware
-// Permitir CORS para desenvolvimento (permite localhost em qualquer porta)
+// Permitir CORS para desenvolvimento (permite localhost, ngrok e outros domínios)
 app.use(cors({
   origin: function(origin, callback) {
-    // Permitir requisições sem origem (ex: Postman, Mobile apps) ou de localhost em qualquer porta
-    if (!origin || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:') || origin === FRONTEND_URL) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
+    // Permitir requisições sem origem (ex: Postman, Mobile apps)
+    if (!origin) {
+      return callback(null, true);
     }
+    
+    // Permitir localhost em qualquer porta
+    if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+      return callback(null, true);
+    }
+    
+    // Permitir domínios ngrok (https://*.ngrok-free.app, https://*.ngrok.io, etc)
+    if (origin.includes('ngrok-free.app') || origin.includes('ngrok.io') || origin.includes('ngrok.app')) {
+      return callback(null, true);
+    }
+    
+    // Permitir se for o FRONTEND_URL configurado
+    if (origin === FRONTEND_URL) {
+      return callback(null, true);
+    }
+    
+    // Permitir qualquer origem em desenvolvimento (pode ser restrito em produção)
+    // Para produção, adicione uma whitelist de domínios aqui
+    callback(null, true);
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'ngrok-skip-browser-warning'],
+  exposedHeaders: ['X-Request-Id'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }));
 
-// Servir arquivos estáticos do frontend (DEVE VIR ANTES dos parsers de body)
-const frontendPath = path.join(__dirname, '..', 'frontend');
-console.log(`[INFO] Frontend path: ${frontendPath}`);
-app.use(express.static(frontendPath, {
-  index: false, // Não usar index automático, vamos usar rota específica
-  setHeaders: (res, path) => {
-    // Adicionar headers para arquivos estáticos
-    if (path.endsWith('.html')) {
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    }
-  }
-}));
-
-// Rota para servir o index.html na raiz
-app.get('/', (req, res) => {
-  const indexPath = path.join(frontendPath, 'index.html');
-  console.log(`[INFO] Servindo index.html de: ${indexPath}`);
-  res.sendFile(indexPath, (err) => {
-    if (err) {
-      console.error(`[ERROR] Erro ao servir index.html:`, err);
-      res.status(500).send('Erro ao carregar página inicial');
-    }
-  });
-});
-
-// Middleware para limitar tamanho do body (DEPOIS dos arquivos estáticos)
-app.use(express.text({ 
-  type: '*/*',
+// Middleware para limitar tamanho do body (ANTES de todas as rotas)
+// Ordem importante: json primeiro, depois urlencoded, depois text (para não interferir)
+app.use(express.json({ 
   limit: MAX_BODY_SIZE 
 }));
 app.use(express.urlencoded({ 
   extended: true,
   limit: MAX_BODY_SIZE 
 }));
-app.use(express.json({ 
+app.use(express.text({ 
+  type: 'text/*',
   limit: MAX_BODY_SIZE 
 }));
 
@@ -497,6 +498,87 @@ app.post('/webhook/delorean', (req, res) => {
 });
 
 /**
+ * OPTIONS para CORS preflight do endpoint de transcrição
+ */
+app.options('/api/transcribe', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.sendStatus(204);
+});
+
+/**
+ * Endpoint para transcrição de áudio
+ * Recebe URL ou código de gravação e retorna a transcrição usando múltiplos providers (OpenAI, Gemini, etc.)
+ * com fallback automático entre providers disponíveis
+ */
+app.post('/api/transcribe', async (req, res) => {
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
+  try {
+    // Validar parâmetros
+    const { audioUrl, codigo, companyCode, calldate } = req.body;
+
+    if (!companyCode) {
+      return res.status(400).json({
+        success: false,
+        message: 'Parâmetro "companyCode" é obrigatório',
+        requestId
+      });
+    }
+
+    // Criar callback de log para o serviço
+    const logCallback = (level, message, data = {}) => {
+      structuredLog(level, requestId, message, data);
+    };
+
+    // Chamar serviço de transcrição
+    const resultado = await transcreverAudio(audioUrl, codigo, companyCode, calldate, logCallback);
+
+    // Adicionar requestId ao resultado
+    resultado.requestId = requestId;
+
+    res.json(resultado);
+
+  } catch (error) {
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+
+    structuredLog('error', requestId, 'ERRO ao transcrever áudio', {
+      error: error.message,
+      stack: error.stack,
+      duracao: duration
+    });
+
+    // Determinar status code baseado no tipo de erro
+    let statusCode = 500;
+    const codigoErro = error.code || '';
+    const mensagemErro = error.message || '';
+    
+    if (mensagemErro.includes('Parâmetro') || mensagemErro.includes('obrigatório') || mensagemErro.includes('URL inválida')) {
+      statusCode = 400;
+    } else if (codigoErro === 'INVALID_TOKEN' || codigoErro === 'NO_TOKEN' || codigoErro === 'COMPANY_NOT_FOUND') {
+      statusCode = 401;
+    } else if (codigoErro === 'TIMEOUT') {
+      statusCode = 408;
+    } else if (codigoErro === 'RATE_LIMIT') {
+      statusCode = 429;
+    } else if (mensagemErro.includes('Token') || mensagemErro.includes('API') || mensagemErro.includes('token')) {
+      statusCode = 401;
+    }
+
+    res.status(statusCode).json({
+      success: false,
+      message: error.message || 'Erro ao transcrever áudio',
+      error: error.message,
+      errorCode: error.code || 'UNKNOWN_ERROR',
+      requestId
+    });
+  }
+});
+
+/**
  * Endpoint para o frontend buscar o último webhook recebido (polling)
  * Retorna os dados processados pelo n8n (com URL montada) se disponível,
  * senão retorna os dados brutos do Delorean
@@ -815,6 +897,7 @@ app.get('/info', (req, res) => {
       receive: 'POST /webhook/delorean',
       getLatest: 'GET /api/get-latest-webhook',
       forward: 'POST /api/forward-webhook',
+      transcribe: 'POST /api/transcribe',
       audit: 'GET /api/audit',
       stats: 'GET /api/stats',
       health: 'GET /health'
@@ -823,6 +906,30 @@ app.get('/info', (req, res) => {
       step1: 'Configure o webhook do Delorean para apontar para: http://SEU_SERVIDOR:PORT/webhook/delorean',
       step2: 'No frontend, faça polling em GET /api/get-latest-webhook ou use Server-Sent Events',
       step3: 'Quando receber o webhook, chame window.receberWebhook(dados) no frontend'
+    }
+  });
+});
+
+// Servir arquivos estáticos do frontend (DEPOIS de todas as rotas da API)
+const frontendPath = path.join(__dirname, '..', 'frontend');
+console.log(`[INFO] Frontend path: ${frontendPath}`);
+app.use(express.static(frontendPath, {
+  index: false,
+  setHeaders: (res, path) => {
+    if (path.endsWith('.html')) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    }
+  }
+}));
+
+// Rota para servir o index.html na raiz (DEPOIS de todas as rotas da API)
+app.get('/', (req, res) => {
+  const indexPath = path.join(frontendPath, 'index.html');
+  console.log(`[INFO] Servindo index.html de: ${indexPath}`);
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      console.error(`[ERROR] Erro ao servir index.html:`, err);
+      res.status(500).send('Erro ao carregar página inicial');
     }
   });
 });
