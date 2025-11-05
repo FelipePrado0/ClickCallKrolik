@@ -799,7 +799,14 @@ class ClickCallManager {
 
   async transcreverAudio(gravacao, index) {
     let codigo = gravacao.codigo || '';
-    const companyCode = gravacao.company_id;
+    let companyCode = gravacao.company_id;
+    
+    if (!companyCode && gravacao.src) {
+      const srcString = String(gravacao.src);
+      if (srcString.length >= 3) {
+        companyCode = srcString.substring(0, 3);
+      }
+    }
     
     if (!companyCode) {
       console.error('[transcreverAudio] ERRO: company_id não disponível na gravação');
@@ -807,12 +814,31 @@ class ClickCallManager {
       return;
     }
 
+    companyCode = String(companyCode).trim();
+
     if (this.transcribing[codigo]) {
       return;
     }
 
     if (this.transcriptions[codigo]) {
       this.exibirTranscricao(codigo, index);
+      return;
+    }
+
+    try {
+      const checkTokenResponse = await fetch(`${this.webhookServerUrl}/api/check-token?companyCode=${encodeURIComponent(companyCode)}`);
+      if (!checkTokenResponse.ok) {
+        throw new Error(`HTTP ${checkTokenResponse.status}`);
+      }
+      const checkTokenData = await checkTokenResponse.json();
+      
+      if (!checkTokenData.hasToken) {
+        this.showNoTokenModal();
+        return;
+      }
+    } catch (error) {
+      console.error('[transcreverAudio] Erro ao verificar token:', error);
+      this.showNoTokenModal();
       return;
     }
 
@@ -925,11 +951,19 @@ class ClickCallManager {
     }
   }
 
-  transcreverAudioPorButton(buttonElement) {
+  async transcreverAudioPorButton(buttonElement) {
     const codigo = buttonElement.getAttribute('data-codigo');
     const index = parseInt(buttonElement.getAttribute('data-index'));
-    const companyId = buttonElement.getAttribute('data-company-id');
+    let companyId = buttonElement.getAttribute('data-company-id');
     const calldate = buttonElement.getAttribute('data-calldate') || '';
+    const src = buttonElement.getAttribute('data-src') || '';
+    
+    if (!companyId && src) {
+      const srcString = String(src);
+      if (srcString.length >= 3) {
+        companyId = srcString.substring(0, 3);
+      }
+    }
     
     if (!companyId) {
       console.error('[transcreverAudioPorButton] ERRO: company_id não disponível');
@@ -937,8 +971,27 @@ class ClickCallManager {
       return;
     }
 
+    companyId = String(companyId).trim();
+
     if (!codigo) {
       alert('❌ Código da gravação não encontrado');
+      return;
+    }
+
+    try {
+      const checkTokenResponse = await fetch(`${this.webhookServerUrl}/api/check-token?companyCode=${encodeURIComponent(companyId)}`);
+      if (!checkTokenResponse.ok) {
+        throw new Error(`HTTP ${checkTokenResponse.status}`);
+      }
+      const checkTokenData = await checkTokenResponse.json();
+      
+      if (!checkTokenData.hasToken) {
+        this.showNoTokenModal();
+        return;
+      }
+    } catch (error) {
+      console.error('[transcreverAudioPorButton] Erro ao verificar token:', error);
+      this.showNoTokenModal();
       return;
     }
 
@@ -946,7 +999,8 @@ class ClickCallManager {
       codigo: codigo,
       company_id: companyId,
       calldate: calldate,
-      url: ''
+      url: '',
+      src: src
     };
 
     this.transcreverAudio(gravacao, index);
@@ -1250,6 +1304,85 @@ class ClickCallManager {
     `;
     document.body.appendChild(modal);
     const closeBtn = document.getElementById('close-modal-transcricao-erro');
+    closeBtn.onclick = () => {
+      modal.remove();
+    };
+    modal.onclick = (e) => {
+      if (e.target === modal) {
+        modal.remove();
+      }
+    };
+  }
+
+  showNoTokenModal() {
+    const oldModal = document.getElementById('modal-no-token');
+    if (oldModal) oldModal.remove();
+    const modal = document.createElement('div');
+    modal.id = 'modal-no-token';
+    modal.className = 'modal-confirm-bg';
+    modal.style.display = 'flex';
+    modal.style.alignItems = 'center';
+    modal.style.justifyContent = 'center';
+    modal.style.zIndex = '10000';
+    modal.innerHTML = `
+      <div class="modal-confirm" style="
+        width: 100%;
+        max-width: 500px;
+        min-width: 320px;
+        box-sizing: border-box;
+        background: rgba(40,40,60,0.95);
+        backdrop-filter: blur(8px);
+        border-radius: 24px;
+        box-shadow: 0 12px 48px rgba(0,0,0,0.3);
+        padding: 32px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 24px;
+      ">
+        <div style="
+          font-size: 3rem;
+          color: #ffa500;
+          margin-bottom: 8px;
+        ">⚠️</div>
+        <div style="
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: #fff;
+          text-align: center;
+          margin-bottom: 8px;
+        ">Token não encontrado</div>
+        <div style="
+          width: 100%;
+          background: rgba(255,165,0,0.1);
+          border-left: 4px solid #ffa500;
+          border-radius: 8px;
+          padding: 16px;
+          color: #ffd700;
+          font-size: 0.95rem;
+          line-height: 1.6;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+          text-align: center;
+        ">Não detectamos um token de transcrição, para adquirir entre em contato com o time comercial.</div>
+        <button id="close-modal-no-token" class="modal-btn-confirm" style="
+          width: 100%;
+          max-width: 200px;
+          font-size: 1rem;
+          padding: 12px 24px;
+          border-radius: 12px;
+          background: linear-gradient(90deg, #7b0051 60%, #c8007e 100%);
+          color: #fff;
+          font-weight: 600;
+          border: none;
+          box-shadow: 0 2px 8px rgba(123,0,81,0.3);
+          cursor: pointer;
+          transition: background 0.2s, transform 0.2s;
+        " onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">OK</button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    const closeBtn = document.getElementById('close-modal-no-token');
     closeBtn.onclick = () => {
       modal.remove();
     };
@@ -1651,6 +1784,7 @@ class ClickCallManager {
                     data-index="${index}"
                     data-company-id="${this.escapeHtml(gravacao.company_id || '')}"
                     data-calldate="${this.escapeHtml(gravacao.calldate || '')}"
+                    data-src="${this.escapeHtml(gravacao.src || '')}"
                     onclick="window.clickCallManager.transcreverAudioPorButton(this)"
                     style="
                       background: linear-gradient(90deg, #7b0051 60%, #c8007e 100%);
@@ -1970,8 +2104,19 @@ class ClickCallManager {
         console.warn('[processWebhookData] Body completo:', body);
       }
 
+      if (!company_id && src) {
+        const srcString = String(src);
+        if (srcString.length >= 3) {
+          company_id = srcString.substring(0, 3);
+        }
+      }
+      
+      if (company_id) {
+        company_id = String(company_id).trim();
+      }
+
       if (!company_id) {
-        console.error('[processWebhookData] ERRO: company_id não encontrado nos dados do webhook');
+        console.error('[processWebhookData] ERRO: company_id não encontrado nos dados do webhook e não foi possível extrair do ramal');
         console.error('[processWebhookData] Body completo:', body);
         this.showError('Código da empresa (company_id) não encontrado nos dados do webhook. Não é possível processar a gravação.');
         return;

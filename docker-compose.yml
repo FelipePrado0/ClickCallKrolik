@@ -9,7 +9,7 @@ services:
     environment:
       - PORT=4201
       - FRONTEND_URL=http://localhost:4201
-      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL:-https://n8n-production-44e4.up.railway.app/webhook/6183dae4-72ae-4054-a430-451cae84d355}
+      - N8N_WEBHOOK_URL=${N8N_WEBHOOK_URL:-https://n8n-voip.krolik.com.br/webhook/6183dae4-72ae-4054-a430-451cae84d355}
       - WHITELIST_IPS=${WHITELIST_IPS:-}
       - MAX_BODY_SIZE=${MAX_BODY_SIZE:-100000}
       - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60000}

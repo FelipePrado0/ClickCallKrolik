@@ -16,6 +16,7 @@ const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 const https = require('https');
 const urlModule = require('url');
 const { transcreverAudio } = require('./transcription-service');
@@ -23,7 +24,7 @@ const { transcreverAudio } = require('./transcription-service');
 const app = express();
 const PORT = process.env.PORT || 4201;
 const FRONTEND_URL = process.env.FRONTEND_URL || `http://localhost:${PORT}`;
-const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n-production-44e4.up.railway.app/webhook/6183dae4-72ae-4054-a430-451cae84d355';
+const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n-voip.krolik.com.br/webhook/6183dae4-72ae-4054-a430-451cae84d355';
 
 // Configurações de segurança e validação
 const WHITELIST_IPS = (process.env.WHITELIST_IPS || '').split(',').filter(ip => ip.trim());
@@ -462,7 +463,7 @@ app.post('/webhook/delorean', (req, res) => {
     structuredLog('info', requestId, 'Webhook recebido e processado. Dados prontos para repassar ao frontend.');
     
     // Encaminhar para n8n de forma assíncrona (não bloquear a resposta ao Delorean)
-    // Usar node-fetch se disponível, senão usar fetch global (Node 18+)
+    // Sempre tentar encaminhar, independente da empresa
     const fetchFn = typeof fetch === 'function' ? fetch : null;
     if (fetchFn) {
       // Primeira tentativa imediata
@@ -473,6 +474,49 @@ app.post('/webhook/delorean', (req, res) => {
       });
     } else {
       structuredLog('warn', requestId, 'fetch indisponível. Configure Node 18+ ou instale node-fetch.');
+      try {
+        const https = require('https');
+        const urlModule = require('url');
+        const parsedUrl = urlModule.parse(N8N_WEBHOOK_URL);
+        const postData = webhookString;
+        
+        const options = {
+          hostname: parsedUrl.hostname,
+          port: parsedUrl.port || 443,
+          path: parsedUrl.path,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Content-Length': Buffer.byteLength(postData),
+            'X-Request-Id': requestId
+          },
+          timeout: 10000
+        };
+        
+        const req = https.request(options, (res) => {
+          structuredLog('info', requestId, `n8n respondeu com status ${res.statusCode} (via https)`, {
+            status: res.statusCode
+          });
+        });
+        
+        req.on('error', (err) => {
+          structuredLog('error', requestId, 'Erro ao encaminhar para n8n (via https)', {
+            error: err.message
+          });
+        });
+        
+        req.on('timeout', () => {
+          req.destroy();
+          structuredLog('error', requestId, 'Timeout ao encaminhar para n8n (via https)');
+        });
+        
+        req.write(postData);
+        req.end();
+      } catch (fallbackError) {
+        structuredLog('error', requestId, 'Erro ao usar fallback https para n8n', {
+          error: fallbackError.message
+        });
+      }
     }
     
   } catch (error) {
@@ -575,6 +619,85 @@ app.post('/api/transcribe', async (req, res) => {
       error: error.message,
       errorCode: error.code || 'UNKNOWN_ERROR',
       requestId
+    });
+  }
+});
+
+/**
+ * Endpoint para verificar se empresa tem token de transcrição
+ * Retorna true se tem token, false caso contrário
+ */
+app.get('/api/check-token', async (req, res) => {
+  try {
+    const { companyCode } = req.query;
+
+    if (!companyCode) {
+      return res.status(400).json({
+        success: false,
+        message: 'Parâmetro "companyCode" é obrigatório',
+        hasToken: false
+      });
+    }
+
+    try {
+      const tokensPath = path.join(__dirname, '..', 'Data', 'company_tokens.json');
+      const tokensData = JSON.parse(fs.readFileSync(tokensPath, 'utf8'));
+      
+      const empresa = tokensData.find(emp => String(emp.cod) === String(companyCode));
+      
+      if (!empresa) {
+        return res.json({
+          success: true,
+          hasToken: false,
+          empresa: null
+        });
+      }
+      
+      const preferedToken = empresa.prefered_token || 'openai';
+      const tokensDisponiveis = [];
+      
+      if (empresa.token_openai && 
+          empresa.token_openai !== 'xxxxxxxxxxxxxxx' && 
+          empresa.token_openai !== 'seu-token-openai-aqui' &&
+          String(empresa.token_openai).trim() !== '') {
+        tokensDisponiveis.push({
+          provider: 'openai',
+          token: empresa.token_openai,
+          preferido: preferedToken === 'openai'
+        });
+      }
+      
+      if (empresa.token_gemini && 
+          empresa.token_gemini !== 'xxxxxxxxxxxxxxx' && 
+          empresa.token_gemini !== 'seu-token-gemini-aqui' &&
+          String(empresa.token_gemini).trim() !== '') {
+        tokensDisponiveis.push({
+          provider: 'gemini',
+          token: empresa.token_gemini,
+          preferido: preferedToken === 'gemini'
+        });
+      }
+      
+      const hasToken = tokensDisponiveis.length > 0;
+      
+      return res.json({
+        success: true,
+        hasToken: hasToken,
+        empresa: empresa.nome
+      });
+    } catch (error) {
+      return res.json({
+        success: true,
+        hasToken: false,
+        empresa: null
+      });
+    }
+  } catch (error) {
+    console.error('[check-token] Erro:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Erro ao verificar token',
+      hasToken: false
     });
   }
 });
@@ -952,7 +1075,7 @@ app.listen(PORT, () => {
   console.log('═══════════════════════════════════════════════════');
   console.log('');
   console.log('⚙️  CONFIGURAÇÃO DO DELOREAN:');
-  console.log(`   Configure o webhook URL para: https://n8n-production-44e4.up.railway.app/webhook/6183dae4-72ae-4054-a430-451cae84d355`);
+  console.log(`   Configure o webhook URL para: https://n8n-voip.krolik.com.br/webhook/6183dae4-72ae-4054-a430-451cae84d355`);
   console.log('   Método: POST');
   console.log('   Content-Type: application/x-www-form-urlencoded');
   console.log('');
