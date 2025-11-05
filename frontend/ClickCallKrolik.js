@@ -773,169 +773,217 @@ class ClickCallManager {
         row.style.transform = 'translateY(0)';
       }, index * 50);
     });
-      }
+  }
 
-    async transcreverAudio(gravacao, index) {
-      const codigo = gravacao.codigo;
-      const companyCode = gravacao.company_id || '100'; // Usar company_id do webhook ou padrão
+  async transcreverAudio(gravacao, index) {
+    let codigo = gravacao.codigo || '';
+    const companyCode = gravacao.company_id;
+    
+    if (!companyCode) {
+      console.error('[transcreverAudio] ERRO: company_id não disponível na gravação');
+      alert('❌ Código da empresa não disponível. Não é possível transcrever.');
+      return;
+    }
 
-      if (!codigo) {
-        alert('❌ Código da gravação não disponível');
-        return;
-      }
+    if (this.transcribing[codigo]) {
+      console.log('[transcreverAudio] Já está transcrevendo esta gravação');
+      return;
+    }
 
-      if (this.transcribing[codigo]) {
-        console.log('[transcreverAudio] Já está transcrevendo esta gravação');
-        return;
-      }
+    if (this.transcriptions[codigo]) {
+      console.log('[transcreverAudio] Transcrição já existe, exibindo...');
+      this.exibirTranscricao(codigo, index);
+      return;
+    }
 
-      if (this.transcriptions[codigo]) {
-        console.log('[transcreverAudio] Transcrição já existe, exibindo...');
-        this.exibirTranscricao(codigo, index);
-        return;
-      }
+    this.transcribing[codigo] = true;
 
-      this.transcribing[codigo] = true;
+    this.mostrarLoadingTranscricao(codigo, index);
 
-      this.mostrarLoadingTranscricao(codigo, index);
+    try {
 
-      try {
+      let audioUrl = gravacao.url || '';
+      
+      if (!audioUrl && codigo) {
+        const calldate = gravacao.calldate || '';
+        let ehGravacaoDeHoje = false;
 
-        let audioUrl = gravacao.url || '';
-        if (!audioUrl && codigo) {
+        if (calldate) {
+          try {
+            const calldateStr = calldate.replace(/\+/g, ' ').replace(/%3A/g, ':');
+            const dataGravacao = new Date(calldateStr);
+            const hoje = new Date();
 
-          const calldate = gravacao.calldate || '';
-          let ehGravacaoDeHoje = false;
+            const dataGravacaoSemHora = new Date(
+              dataGravacao.getFullYear(),
+              dataGravacao.getMonth(),
+              dataGravacao.getDate()
+            );
+            const hojeSemHora = new Date(
+              hoje.getFullYear(),
+              hoje.getMonth(),
+              hoje.getDate()
+            );
 
-          if (calldate) {
-            try {
-              const calldateStr = calldate.replace(/\+/g, ' ').replace(/%3A/g, ':');
-              const dataGravacao = new Date(calldateStr);
-              const hoje = new Date();
-
-              const dataGravacaoSemHora = new Date(
-                dataGravacao.getFullYear(),
-                dataGravacao.getMonth(),
-                dataGravacao.getDate()
-              );
-              const hojeSemHora = new Date(
-                hoje.getFullYear(),
-                hoje.getMonth(),
-                hoje.getDate()
-              );
-
-              ehGravacaoDeHoje = dataGravacaoSemHora.getTime() === hojeSemHora.getTime();
-            } catch (e) {
-              console.warn('[transcreverAudio] Erro ao parsear data:', e);
-            }
+            ehGravacaoDeHoje = dataGravacaoSemHora.getTime() === hojeSemHora.getTime();
+          } catch (e) {
+            console.warn('[transcreverAudio] Erro ao parsear data:', e);
           }
-
-          audioUrl = ehGravacaoDeHoje 
-            ? `https://delorean.krolik.com.br/records/${codigo}.wav`
-            : `https://delorean.krolik.com.br/records/${codigo}.mp3`;
         }
 
-        const response = await fetch(`${this.webhookServerUrl}/api/transcribe`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            audioUrl: audioUrl,
-            codigo: codigo,
-            companyCode: companyCode,
-            calldate: gravacao.calldate || ''
-          })
+        audioUrl = ehGravacaoDeHoje 
+          ? `https://delorean.krolik.com.br/records/${codigo}.wav`
+          : `https://delorean.krolik.com.br/records/${codigo}.mp3`;
+      }
+
+      if (!codigo && audioUrl) {
+        const urlMatch = audioUrl.match(/\/([^\/]+)\.(wav|mp3|m4a|ogg)$/i);
+        if (urlMatch && urlMatch[1]) {
+          codigo = urlMatch[1];
+        } else {
+          const recordMatch = audioUrl.match(/\/record[s]?\/?([^\/\?]+)/i);
+          if (recordMatch && recordMatch[1]) {
+            codigo = recordMatch[1];
+          }
+        }
+      }
+
+      if (!codigo) {
+        console.error('[transcreverAudio] ERRO: Código da gravação não disponível');
+        console.error('[transcreverAudio] Gravacao:', gravacao);
+        alert('❌ Código da gravação não disponível. Não é possível transcrever.');
+        this.transcribing[codigo] = false;
+        return;
+      }
+
+      const response = await fetch(`${this.webhookServerUrl}/api/transcribe`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          audioUrl: audioUrl,
+          codigo: codigo,
+          companyCode: companyCode,
+          calldate: gravacao.calldate || ''
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Erro HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.transcription) {
+
+        this.transcriptions[codigo] = {
+          texto: data.transcription || '',
+          provider: data.provider || 'unknown',
+          model: data.model || 'unknown',
+          duration: data.duration || 0,
+          requestId: data.requestId || '',
+          timestamp: new Date().toISOString()
+        };
+
+        console.log('[transcreverAudio] Transcrição salva:', {
+          codigo: codigo,
+          tamanhoTexto: this.transcriptions[codigo].texto.length,
+          provider: this.transcriptions[codigo].provider,
+          model: this.transcriptions[codigo].model,
+          duration: this.transcriptions[codigo].duration
         });
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.message || `Erro HTTP ${response.status}`);
-        }
+        this.exibirTranscricao(codigo, index);
 
-        const data = await response.json();
-
-        if (data.success && data.transcription) {
-
-          this.transcriptions[codigo] = {
-            texto: data.transcription,
-            provider: data.provider,
-            model: data.model,
-            duration: data.duration,
-            requestId: data.requestId,
-            timestamp: new Date().toISOString()
-          };
-
-          this.exibirTranscricao(codigo, index);
-
-          console.log('[transcreverAudio] ✅ Transcrição concluída', {
-            provider: data.provider,
-            duration: data.duration,
-            tamanho: data.transcription.length
-          });
-        } else {
-          throw new Error(data.message || 'Erro desconhecido na transcrição');
-        }
-
-      } catch (error) {
-        console.error('[transcreverAudio] ❌ Erro:', error);
-
-        this.mostrarErroTranscricao(codigo, index, error.message);
-
-        this.showTranscriptionErrorModal(error.message);
-      } finally {
-
-        delete this.transcribing[codigo];
-      }
-    }
-
-    transcreverAudioPorButton(buttonElement) {
-      const codigo = buttonElement.getAttribute('data-codigo');
-      const index = parseInt(buttonElement.getAttribute('data-index'));
-      const companyId = buttonElement.getAttribute('data-company-id') || '100';
-      const calldate = buttonElement.getAttribute('data-calldate') || '';
-
-      if (!codigo) {
-        alert('❌ Código da gravação não encontrado');
-        return;
+        console.log('[transcreverAudio] ✅ Transcrição concluída', {
+          provider: data.provider,
+          duration: data.duration,
+          tamanho: data.transcription.length
+        });
+      } else {
+        throw new Error(data.message || 'Erro desconhecido na transcrição');
       }
 
-      const gravacao = {
-        codigo: codigo,
-        company_id: companyId,
-        calldate: calldate,
-        url: '' // Será montada automaticamente
-      };
+    } catch (error) {
+      console.error('[transcreverAudio] ❌ Erro:', error);
 
-      this.transcreverAudio(gravacao, index);
+      this.mostrarErroTranscricao(codigo, index, error.message);
+
+      this.showTranscriptionErrorModal(error.message);
+    } finally {
+
+      delete this.transcribing[codigo];
+    }
+  }
+
+  transcreverAudioPorButton(buttonElement) {
+    const codigo = buttonElement.getAttribute('data-codigo');
+    const index = parseInt(buttonElement.getAttribute('data-index'));
+    const companyId = buttonElement.getAttribute('data-company-id');
+    const calldate = buttonElement.getAttribute('data-calldate') || '';
+    
+    if (!companyId) {
+      console.error('[transcreverAudioPorButton] ERRO: company_id não disponível');
+      alert('❌ Código da empresa não disponível. Não é possível transcrever.');
+      return;
     }
 
-    mostrarLoadingTranscricao(codigo, index) {
-      const transcricaoElement = document.getElementById(`transcricao-${index}`);
-      if (transcricaoElement) {
-        transcricaoElement.innerHTML = `
-          <div style="color: #c8007e; font-size: 0.95rem; text-align: center; padding: 20px;">
-            <div style="display: inline-block; animation: spin 1s linear infinite; font-size: 1.5rem; margin-bottom: 8px;">⏳</div>
-            <div>Transcrevendo áudio...</div>
-            <div style="font-size: 0.85rem; color: #999; margin-top: 8px;">Isso pode levar alguns segundos</div>
-          </div>
-          <style>
-            @keyframes spin {
-              from { transform: rotate(0deg); }
-              to { transform: rotate(360deg); }
-            }
-          </style>
-        `;
-      }
+    if (!codigo) {
+      alert('❌ Código da gravação não encontrado');
+      return;
     }
 
-    exibirTranscricao(codigo, index) {
-      const transcricao = this.transcriptions[codigo];
-      if (!transcricao) return;
+    const gravacao = {
+      codigo: codigo,
+      company_id: companyId,
+      calldate: calldate,
+      url: ''
+    };
 
-      const transcricaoElement = document.getElementById(`transcricao-${index}`);
-      if (transcricaoElement) {
-        transcricaoElement.innerHTML = `
+    this.transcreverAudio(gravacao, index);
+  }
+
+  mostrarLoadingTranscricao(codigo, index) {
+    const transcricaoElement = document.getElementById(`transcricao-${index}`);
+    if (transcricaoElement) {
+      transcricaoElement.innerHTML = `
+        <div style="color: #c8007e; font-size: 0.95rem; text-align: center; padding: 20px;">
+          <div style="display: inline-block; animation: spin 1s linear infinite; font-size: 1.5rem; margin-bottom: 8px;">⏳</div>
+          <div>Transcrevendo áudio...</div>
+          <div style="font-size: 0.85rem; color: #999; margin-top: 8px;">Isso pode levar alguns segundos</div>
+        </div>
+        <style>
+          @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        </style>
+      `;
+    }
+  }
+
+  exibirTranscricao(codigo, index) {
+    const transcricao = this.transcriptions[codigo];
+    if (!transcricao) {
+      console.error('[exibirTranscricao] Transcrição não encontrada para código:', codigo);
+      return;
+    }
+
+    if (!transcricao.texto) {
+      console.error('[exibirTranscricao] Texto da transcrição vazio para código:', codigo);
+      console.error('[exibirTranscricao] Transcrição completa:', transcricao);
+      return;
+    }
+
+    const transcricaoElement = document.getElementById(`transcricao-${index}`);
+    if (!transcricaoElement) {
+      console.error('[exibirTranscricao] Elemento de transcrição não encontrado para índice:', index);
+      return;
+    }
+    
+    transcricaoElement.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
             <div style="color: #c8007e; font-size: 0.9rem; font-weight: 600;">
               📝 Transcrição (${transcricao.provider === 'openai' ? 'OpenAI' : 'Gemini'})
@@ -979,16 +1027,15 @@ class ClickCallManager {
             margin-top: 8px;
             text-align: right;
           ">
-            Tempo de processamento: ${transcricao.duration.toFixed(2)}s
+            Tempo de processamento: ${this.formatarDuracaoProcessamento(transcricao.duration)}s
           </div>
         `;
-      }
-    }
+  }
 
-    mostrarErroTranscricao(codigo, index, mensagemErro) {
-      const transcricaoElement = document.getElementById(`transcricao-${index}`);
-      if (transcricaoElement) {
-        transcricaoElement.innerHTML = `
+  mostrarErroTranscricao(codigo, index, mensagemErro) {
+    const transcricaoElement = document.getElementById(`transcricao-${index}`);
+    if (transcricaoElement) {
+      transcricaoElement.innerHTML = `
           <div style="
             color: #ff6666;
             font-size: 0.9rem;
@@ -1020,13 +1067,21 @@ class ClickCallManager {
             </button>
           </div>
         `;
-      }
     }
+  }
 
   escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  formatarDuracaoProcessamento(duration) {
+    if (!duration) return 'N/A';
+    if (typeof duration === 'number') {
+      return duration.toFixed(2);
+    }
+    return String(duration);
   }
 
   handleDragEnter(e) {
@@ -1247,7 +1302,7 @@ class ClickCallManager {
       }
 
       console.warn('[formatarDataHora] Não foi possível formatar a data:', calldate, 'dataStr:', dataStr);
-      return calldate; // Retorna original se não conseguir formatar
+      return calldate;
     } catch (e) {
       console.error('[formatarDataHora] Erro ao formatar data:', e, 'calldate:', calldate);
       return calldate;
@@ -1564,7 +1619,7 @@ class ClickCallManager {
                   margin-top: 8px;
                   text-align: right;
                 ">
-                  Tempo de processamento: ${this.transcriptions[gravacao.codigo].duration.toFixed(2)}s
+                  Tempo de processamento: ${this.formatarDuracaoProcessamento(this.transcriptions[gravacao.codigo].duration)}s
                 </div>
               ` : this.transcribing[gravacao.codigo] ? `
                 <!-- Loading -->
@@ -1588,7 +1643,7 @@ class ClickCallManager {
                   <button 
                     data-codigo="${this.escapeHtml(gravacao.codigo || '')}"
                     data-index="${index}"
-                    data-company-id="${this.escapeHtml(gravacao.company_id || '100')}"
+                    data-company-id="${this.escapeHtml(gravacao.company_id || '')}"
                     data-calldate="${this.escapeHtml(gravacao.calldate || '')}"
                     onclick="window.clickCallManager.transcreverAudioPorButton(this)"
                     style="
@@ -1783,15 +1838,29 @@ class ClickCallManager {
         duration = body.duration || '0';
         billsec = body.billsec || '0';
         disposition = body.disposition || '';
-        userfield = body.userfield || '';
+        userfield = body.userfield || body.codigo || body.recording_id || body.recording_code || '';
         price = body.price || '0';
         company_id = body.company_id || '';
         accountcode = body.accountcode || '';
         callid = body.callid || ''; // CallID do contato (nome)
         url = body.url || ''; // URL já processada pelo n8n
 
+        if (!userfield && url) {
+          const urlMatch = url.match(/\/([^\/]+)\.(wav|mp3|m4a|ogg)$/i);
+          if (urlMatch && urlMatch[1]) {
+            userfield = urlMatch[1];
+          } else {
+            const recordMatch = url.match(/\/record[s]?\/?([^\/\?]+)/i);
+            if (recordMatch && recordMatch[1]) {
+              userfield = recordMatch[1];
+            }
+          }
+        }
+
         console.log('[processWebhookData] Dados recebidos (JSON):', {
           calldate: calldate,
+          userfield: userfield,
+          url: url,
           bodyKeys: Object.keys(body),
           bodyCalldate: body.calldate,
           bodyCall_date: body.call_date,
@@ -1877,6 +1946,31 @@ class ClickCallManager {
         url = `https://delorean.krolik.com.br/services/record/${userfield}`;
       }
 
+      if (!userfield && url) {
+        const urlMatch = url.match(/\/([^\/]+)\.(wav|mp3|m4a|ogg)$/i);
+        if (urlMatch && urlMatch[1]) {
+          userfield = urlMatch[1];
+        } else {
+          const recordMatch = url.match(/\/record[s]?\/?([^\/\?]+)/i);
+          if (recordMatch && recordMatch[1]) {
+            userfield = recordMatch[1];
+          }
+        }
+      }
+
+      if (!userfield) {
+        console.warn('[processWebhookData] ATENÇÃO: userfield não encontrado nos dados do webhook');
+        console.warn('[processWebhookData] URL:', url);
+        console.warn('[processWebhookData] Body completo:', body);
+      }
+
+      if (!company_id) {
+        console.error('[processWebhookData] ERRO: company_id não encontrado nos dados do webhook');
+        console.error('[processWebhookData] Body completo:', body);
+        this.showError('Código da empresa (company_id) não encontrado nos dados do webhook. Não é possível processar a gravação.');
+        return;
+      }
+
       const dispositionNormalizado = 'Atendida';
 
       const gravacao = {
@@ -1890,7 +1984,7 @@ class ClickCallManager {
         callid: callid || '', // Armazenar callid (nome do contato)
         url: url,
         price: price || '0',
-        company_id: company_id || '',
+        company_id: company_id,
         accountcode: accountcode || ''
       };
 

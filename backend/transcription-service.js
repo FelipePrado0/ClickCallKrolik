@@ -9,8 +9,8 @@ const fs = require('fs');
 const https = require('https');
 const urlModule = require('url');
 const path = require('path');
-const OpenAI = require('openai');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { transcreverComOpenAI } = require('./transcription-openai');
+const { transcreverComGemini } = require('./transcription-gemini');
 
 /**
  * Detecta o formato de áudio baseado na data da gravação
@@ -164,144 +164,6 @@ function buscarTokensEmpresa(companyCode) {
   }
 }
 
-/**
- * Transcreve áudio usando OpenAI Whisper API
- * @param {Buffer} audioBuffer - Buffer do áudio
- * @param {string} token - Token da OpenAI
- * @param {string} mimeType - Tipo MIME do áudio (padrão: 'audio/wav')
- * @returns {Promise<string>} Texto transcrito
- */
-async function transcreverComOpenAI(audioBuffer, token, mimeType = 'audio/wav') {
-  const openai = new OpenAI({
-    apiKey: token,
-    timeout: 60000 // 60 segundos
-  });
-
-  let lastError = null;
-
-  // Tentar até 3 vezes
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      // Fazer transcrição usando SDK OpenAI
-      const transcription = await openai.audio.transcriptions.create({
-        file: audioBuffer,
-        model: 'whisper-1',
-        language: 'pt',
-        response_format: 'json'
-      });
-
-      return transcription.text;
-    } catch (error) {
-      lastError = error;
-
-      // Se der erro com Buffer direto, tentar com FormData (fallback)
-      if (attempt === 1 && (error.message.includes('file') || error.message.includes('format'))) {
-        try {
-          const FormData = require('form-data');
-          const axios = require('axios');
-
-          const form = new FormData();
-          form.append('file', audioBuffer, {
-            filename: 'audio.wav',
-            contentType: mimeType
-          });
-          form.append('model', 'whisper-1');
-          form.append('language', 'pt');
-          form.append('response_format', 'json');
-
-          const response = await axios.post(
-            'https://api.openai.com/v1/audio/transcriptions',
-            form,
-            {
-              headers: {
-                ...form.getHeaders(),
-                'Authorization': `Bearer ${token}`
-              },
-              timeout: 60000
-            }
-          );
-
-          return response.data.text;
-        } catch (fallbackError) {
-          lastError = fallbackError;
-          if (attempt < 3) {
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-            continue;
-          }
-        }
-      } else {
-        if (attempt < 3) {
-          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
-          continue;
-        }
-      }
-    }
-  }
-
-  throw lastError;
-}
-
-/**
- * Transcreve áudio usando Google Gemini API
- * @param {Buffer} audioBuffer - Buffer do áudio
- * @param {string} token - Token da Gemini
- * @param {string} mimeType - Tipo MIME do áudio (padrão: 'audio/wav')
- * @returns {Promise<string>} Texto transcrito
- */
-async function transcreverComGemini(audioBuffer, token, mimeType = 'audio/wav') {
-  try {
-    const genAI = new GoogleGenerativeAI(token);
-    
-    // Converter buffer para base64
-    const base64Audio = audioBuffer.toString('base64');
-    
-    // Mapear MIME types
-    const geminiMimeType = mimeType === 'audio/mpeg' ? 'audio/mpeg' : 'audio/wav';
-    
-    // Usar o modelo Gemini para transcrição de áudio
-    // Tentar gemini-1.5-flash primeiro (mais rápido e suporta áudio)
-    // Se não funcionar, tentar gemini-pro
-    let model;
-    try {
-      model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-    } catch (e) {
-      model = genAI.getGenerativeModel({ model: 'gemini-pro' });
-    }
-    
-    const prompt = "Transcreva este áudio para português. Retorne APENAS o texto transcrito, sem comentários ou explicações adicionais.";
-    
-    // Preparar o áudio no formato que o Gemini espera
-    const result = await model.generateContent([
-      prompt,
-      {
-        inlineData: {
-          data: base64Audio,
-          mimeType: geminiMimeType
-        }
-      }
-    ]);
-    
-    const response = await result.response;
-    const texto = response.text();
-    
-    return texto.trim();
-  } catch (error) {
-    // Melhorar mensagens de erro do Gemini
-    let mensagemErro = error.message || 'Erro desconhecido';
-    
-    if (error.message && error.message.includes('API_KEY_INVALID') || error.message.includes('401')) {
-      mensagemErro = 'Token da API Gemini inválido ou expirado. Configure um token válido no company_tokens.json';
-    } else if (error.message && error.message.includes('403')) {
-      mensagemErro = 'Acesso negado à API Gemini. Verifique as permissões do token.';
-    } else if (error.message && error.message.includes('429')) {
-      mensagemErro = 'Limite de requisições da API Gemini atingido. Aguarde alguns minutos.';
-    } else if (error.message && (error.message.includes('INVALID_ARGUMENT') || error.message.includes('not supported'))) {
-      mensagemErro = 'Formato de áudio não suportado pela API Gemini. Tente usar OpenAI.';
-    }
-    
-    throw new Error(`Erro na transcrição com Gemini: ${mensagemErro}`);
-  }
-}
 
 /**
  * Função principal de transcrição com fallback automático
@@ -369,9 +231,17 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
 
   log('info', 'Áudio baixado com sucesso', {
     tamanho: audioBuffer.length,
+    tamanhoKB: (audioBuffer.length / 1024).toFixed(2),
     formato: mimeType,
-    tentativas
+    tentativas,
+    urlUsada: formatoInfo.tentar.length > 0 ? (formatoInfo.tentar[0] === 'wav' ? formatoInfo.urlWav : formatoInfo.urlMp3) : urlFinal
   });
+  
+  if (audioBuffer.length < 1000) {
+    log('warn', 'Áudio muito pequeno, pode estar corrompido ou vazio', {
+      tamanho: audioBuffer.length
+    });
+  }
 
   // Buscar tokens da empresa
   const tokensInfo = buscarTokensEmpresa(companyCode);
@@ -390,12 +260,25 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
         preferido: tokenInfo.preferido
       });
 
-      let transcricao = null;
-
+      let transcricaoTexto = null;
+      let modeloUsado = null;
+      
       if (tokenInfo.provider === 'openai') {
-        transcricao = await transcreverComOpenAI(audioBuffer, tokenInfo.token, mimeType);
+        transcricaoTexto = await transcreverComOpenAI(audioBuffer, tokenInfo.token, mimeType);
+        modeloUsado = 'whisper-1';
       } else if (tokenInfo.provider === 'gemini') {
-        transcricao = await transcreverComGemini(audioBuffer, tokenInfo.token, mimeType);
+        log('info', `Enviando URL do áudio para Gemini`, {
+          url: urlFinal,
+          mimeType: mimeType,
+          tamanhoKB: audioBuffer ? (audioBuffer.length / 1024).toFixed(2) : 'N/A'
+        });
+        const resultadoGemini = await transcreverComGemini(audioBuffer, tokenInfo.token, mimeType, urlFinal);
+        transcricaoTexto = resultadoGemini.texto;
+        modeloUsado = resultadoGemini.modelo || 'gemini-2.5-flash-lite';
+        log('info', `Transcrição Gemini recebida`, {
+          tamanhoTexto: transcricaoTexto.length,
+          modelo: modeloUsado
+        });
       } else {
         throw new Error(`Provider não suportado: ${tokenInfo.provider}`);
       }
@@ -404,14 +287,15 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
       
       log('info', 'Transcrição concluída', {
         provider: tokenInfo.provider,
+        modelo: modeloUsado,
         duracao: duration,
-        tamanhoTranscricao: transcricao.length
+        tamanhoTranscricao: transcricaoTexto.length
       });
 
       return {
         success: true,
-        transcription: transcricao,
-        model: tokenInfo.provider === 'openai' ? 'whisper-1' : 'gemini-1.5-pro',
+        transcription: transcricaoTexto,
+        model: modeloUsado,
         provider: tokenInfo.provider,
         duration: parseFloat(duration),
         language: 'pt'
@@ -420,6 +304,8 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
       ultimoErro = error;
       log('warn', `Falha na transcrição com ${tokenInfo.provider}`, {
         error: error.message,
+        errorCode: error.code || 'N/A',
+        errorString: JSON.stringify(error).substring(0, 200),
         tentandoProximo: tokensInfo.tokens.indexOf(tokenInfo) < tokensInfo.tokens.length - 1
       });
 
@@ -436,8 +322,23 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
   
   if (ultimoErro) {
     const erroMsg = ultimoErro.message || '';
+    const erroString = JSON.stringify(ultimoErro) || '';
+    const erroCode = ultimoErro.code || '';
+    const fullErrorText = (erroMsg + ' ' + erroString).toLowerCase();
     
-    if (erroMsg.includes('Invalid API key') || erroMsg.includes('401') || erroMsg.includes('API_KEY_INVALID')) {
+    if (erroCode === 'INVALID_TOKEN' || erroCode === 'NO_TOKEN' || erroCode === 'COMPANY_NOT_FOUND') {
+      mensagemErro = erroMsg.includes('Token') ? erroMsg : 'Token da API inválido ou expirado. Verifique os tokens configurados em company_tokens.json';
+      codigoErro = erroCode;
+    } else if (erroMsg.includes('Token da API') || 
+        erroMsg.includes('Invalid API key') || 
+        erroMsg.includes('401') || 
+        erroMsg.includes('API_KEY_INVALID') ||
+        erroMsg.includes('API key not valid') ||
+        erroMsg.includes('Please pass a valid API key') ||
+        fullErrorText.includes('api_key_invalid') ||
+        fullErrorText.includes('api key not valid') ||
+        fullErrorText.includes('token inválido') ||
+        fullErrorText.includes('token expirado')) {
       mensagemErro = 'Token da API inválido ou expirado. Verifique os tokens configurados em company_tokens.json';
       codigoErro = 'INVALID_TOKEN';
     } else if (erroMsg.includes('timeout') || erroMsg.includes('Timeout')) {
@@ -452,7 +353,7 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
     } else if (erroMsg.includes('Empresa com código')) {
       mensagemErro = `Empresa não encontrada. Verifique se o código da empresa está correto e se existe em company_tokens.json`;
       codigoErro = 'COMPANY_NOT_FOUND';
-    } else if (erroMsg.includes('não suportado') || erroMsg.includes('not supported')) {
+    } else if (erroCode === 'FORMAT_NOT_SUPPORTED' || (erroMsg.includes('não suportado') && !erroMsg.includes('Token')) || (erroMsg.includes('not supported') && !erroMsg.includes('token'))) {
       mensagemErro = 'Formato de áudio não suportado pela API. Tente outro provider.';
       codigoErro = 'FORMAT_NOT_SUPPORTED';
     } else {
@@ -469,7 +370,5 @@ module.exports = {
   transcreverAudio,
   detectarFormatoAudio,
   baixarAudio,
-  buscarTokensEmpresa,
-  transcreverComOpenAI,
-  transcreverComGemini
+  buscarTokensEmpresa
 };

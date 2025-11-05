@@ -547,7 +547,9 @@ app.post('/api/transcribe', async (req, res) => {
 
     structuredLog('error', requestId, 'ERRO ao transcrever áudio', {
       error: error.message,
-      stack: error.stack,
+      errorCode: error.code || 'N/A',
+      errorString: JSON.stringify(error).substring(0, 500),
+      stack: error.stack ? error.stack.split('\n').slice(0, 5).join('\n') : 'N/A',
       duracao: duration
     });
 
