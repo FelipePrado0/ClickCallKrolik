@@ -19,17 +19,15 @@ const { transcreverComGemini } = require('./transcription-gemini');
  * @returns {Object} Objeto com formato principal, lista de formatos e URLs
  */
 function detectarFormatoAudio(calldate, codigo) {
-  let formatoPrincipal = 'mp3'; // Mais seguro (padrão)
-  let formatosParaTentar = ['mp3', 'wav'];
+  let formatoPrincipal = 'wav';
+  let formatosParaTentar = ['wav', 'mp3'];
 
   if (calldate) {
     try {
-      // Parse da data
       const calldateStr = calldate.replace(/\+/g, ' ').replace(/%3A/g, ':');
       const dataGravacao = new Date(calldateStr);
       const hoje = new Date();
 
-      // Comparar apenas data (sem hora)
       const dataGravacaoSemHora = new Date(
         dataGravacao.getFullYear(),
         dataGravacao.getMonth(),
@@ -45,11 +43,15 @@ function detectarFormatoAudio(calldate, codigo) {
 
       if (ehHoje) {
         formatoPrincipal = 'wav';
+        formatosParaTentar = ['wav'];
+      } else {
+        formatoPrincipal = 'wav';
         formatosParaTentar = ['wav', 'mp3'];
       }
     } catch (e) {
       console.warn('[detectarFormatoAudio] Erro ao parsear data:', e);
-      // Mantém padrão (MP3)
+      formatoPrincipal = 'wav';
+      formatosParaTentar = ['wav', 'mp3'];
     }
   }
 
@@ -206,6 +208,7 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
   const formatoInfo = detectarFormatoAudio(calldate, codigoGravacao || '');
   let audioBuffer = null;
   let mimeType = null;
+  let urlAudioReal = null;
   let tentativas = 0;
 
   for (const formato of formatoInfo.tentar) {
@@ -215,10 +218,20 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
 
       audioBuffer = await baixarAudio(urlFormatada, 30000);
       mimeType = formato === 'wav' ? 'audio/wav' : 'audio/mpeg';
+      urlAudioReal = urlFormatada;
       tentativas++;
+      
+      console.log(`[transcription-service] ✅ Áudio baixado como ${formato.toUpperCase()}:`, {
+        url: urlFormatada,
+        tamanho: audioBuffer.length,
+        tamanhoKB: (audioBuffer.length / 1024).toFixed(2),
+        mimeType: mimeType
+      });
+      
       break;
     } catch (error) {
       log('warn', `Falha ao baixar ${formato}`, { error: error.message });
+      console.warn(`[transcription-service] ⚠️ Falha ao baixar ${formato.toUpperCase()}:`, error.message);
       if (tentativas === formatoInfo.tentar.length - 1) {
         throw new Error(`Não foi possível baixar áudio em nenhum formato. Último erro: ${error.message}`);
       }
@@ -229,12 +242,16 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
     throw new Error('Não foi possível baixar o áudio');
   }
 
+  if (!urlAudioReal) {
+    urlAudioReal = urlFinal || (formatoInfo.tentar.length > 0 ? (formatoInfo.tentar[0] === 'wav' ? formatoInfo.urlWav : formatoInfo.urlMp3) : '');
+  }
+
   log('info', 'Áudio baixado com sucesso', {
     tamanho: audioBuffer.length,
     tamanhoKB: (audioBuffer.length / 1024).toFixed(2),
     formato: mimeType,
     tentativas,
-    urlUsada: formatoInfo.tentar.length > 0 ? (formatoInfo.tentar[0] === 'wav' ? formatoInfo.urlWav : formatoInfo.urlMp3) : urlFinal
+    urlUsada: urlAudioReal
   });
   
   if (audioBuffer.length < 1000) {
@@ -267,18 +284,32 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
         transcricaoTexto = await transcreverComOpenAI(audioBuffer, tokenInfo.token, mimeType);
         modeloUsado = 'whisper-1';
       } else if (tokenInfo.provider === 'gemini') {
-        log('info', `Enviando URL do áudio para Gemini`, {
-          url: urlFinal,
+        log('info', `Enviando áudio para Gemini`, {
+          url: urlAudioReal,
           mimeType: mimeType,
-          tamanhoKB: audioBuffer ? (audioBuffer.length / 1024).toFixed(2) : 'N/A'
+          tamanhoKB: audioBuffer ? (audioBuffer.length / 1024).toFixed(2) : 'N/A',
+          tamanhoMB: audioBuffer ? (audioBuffer.length / (1024 * 1024)).toFixed(2) : 'N/A'
         });
-        const resultadoGemini = await transcreverComGemini(audioBuffer, tokenInfo.token, mimeType, urlFinal);
+        const resultadoGemini = await transcreverComGemini(audioBuffer, tokenInfo.token, mimeType, urlAudioReal);
         transcricaoTexto = resultadoGemini.texto;
         modeloUsado = resultadoGemini.modelo || 'gemini-2.5-flash-lite';
-        log('info', `Transcrição Gemini recebida`, {
-          tamanhoTexto: transcricaoTexto.length,
+        
+        console.log(`[transcription-service] 📥 Resultado do Gemini recebido:`, {
+          tamanhoTexto: transcricaoTexto ? transcricaoTexto.length : 0,
+          textoPreview: transcricaoTexto ? transcricaoTexto.substring(0, 200) : 'N/A',
+          textoCompleto: transcricaoTexto || 'VAZIO',
           modelo: modeloUsado
         });
+        
+        log('info', `Transcrição Gemini recebida`, {
+          tamanhoTexto: transcricaoTexto ? transcricaoTexto.length : 0,
+          modelo: modeloUsado,
+          textoPreview: transcricaoTexto ? transcricaoTexto.substring(0, 100) : 'N/A'
+        });
+        
+        if (!transcricaoTexto || transcricaoTexto.length === 0) {
+          throw new Error('Transcrição do Gemini está vazia');
+        }
       } else {
         throw new Error(`Provider não suportado: ${tokenInfo.provider}`);
       }
@@ -292,6 +323,13 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
         tamanhoTranscricao: transcricaoTexto.length
       });
 
+      console.log(`[transcription-service] 📤 Retornando resposta para API:`, {
+        tamanhoTranscricao: transcricaoTexto ? transcricaoTexto.length : 0,
+        textoPreview: transcricaoTexto ? transcricaoTexto.substring(0, 200) : 'N/A',
+        provider: tokenInfo.provider,
+        model: modeloUsado
+      });
+      
       return {
         success: true,
         transcription: transcricaoTexto,

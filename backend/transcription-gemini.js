@@ -79,11 +79,52 @@ async function transcreverComGemini(audioBuffer, token, mimeType = 'audio/wav', 
       ]);
       
       const response = await result.response;
-      const texto = response.text();
+      
+      let texto = '';
+      try {
+        texto = response.text();
+        console.log(`[transcreverComGemini] 📝 Resposta completa do Gemini (modelo: ${modeloNome}):`, {
+          tamanhoTexto: texto ? texto.length : 0,
+          textoPreview: texto ? texto.substring(0, 200) : 'N/A',
+          textoCompleto: texto || 'VAZIO'
+        });
+      } catch (textError) {
+        console.error(`[transcreverComGemini] ❌ Erro ao ler texto:`, textError);
+        const candidates = response.candidates || [];
+        if (candidates && candidates.length > 0) {
+          const content = candidates[0].content;
+          if (content && content.parts) {
+            texto = content.parts.map(part => part.text || '').join('');
+            console.log(`[transcreverComGemini] 📝 Texto extraído de candidates:`, {
+              tamanhoTexto: texto ? texto.length : 0,
+              textoPreview: texto ? texto.substring(0, 200) : 'N/A'
+            });
+          }
+        }
+      }
+      
+      if (!texto || texto.length === 0) {
+        console.error(`[transcreverComGemini] ❌ Resposta vazia do Gemini. Response:`, {
+          responseKeys: Object.keys(response),
+          candidates: response.candidates || [],
+          textMethod: typeof response.text
+        });
+        throw new Error('Resposta do Gemini está vazia');
+      }
+      
+      const textoLimpo = texto.trim();
+      
+      console.log(`[transcreverComGemini] ✅ Texto processado:`, {
+        tamanhoOriginal: texto.length,
+        tamanhoLimpo: textoLimpo.length,
+        modelo: modeloNome,
+        primeiros100chars: textoLimpo.substring(0, 100)
+      });
+      
       modeloUsado = modeloNome;
       
       return {
-        texto: texto.trim(),
+        texto: textoLimpo,
         modelo: modeloUsado
       };
     } catch (error) {
