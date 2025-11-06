@@ -1736,12 +1736,11 @@ class ClickCallManager {
           }
 
           const dataFormatada = this.formatarDataHora(gravacao.calldate);       
-          const duracaoFormatada = this.formatarDuracao(gravacao.billsec);
+          const duracaoSegundos = gravacao.billsec || gravacao.duration || '0';
+          const duracaoFormatada = this.formatarDuracao(duracaoSegundos);
 
         const dispositionValue = 'Atendida';
         const dispositionFormatado = this.escapeHtml(dispositionValue);
-
-        const callidDisplay = gravacao.callid ? ` • CallID: ${this.escapeHtml(gravacao.callid)}` : '';
 
         let urlGravacao = gravacao.url || '';
         if (!urlGravacao && gravacao.codigo) {
@@ -1817,13 +1816,13 @@ class ClickCallManager {
             word-wrap: break-word;
             overflow-wrap: break-word;
           ">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
-              <div>
-                <div style="font-size: 1.2rem; font-weight: 600; color: #fff; margin-bottom: 4px;">
+            <div style="display: flex; justify-content: flex-start; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+              <div style="width: 100%;">
+                <div style="font-size: 1.2rem; font-weight: 600; color: #fff; margin-bottom: 4px; text-align: left;">
                   📅 ${dataFormatada}
                 </div>
-                <div style="font-size: 0.95rem; color: #bbb;">
-                  Duração: ${duracaoFormatada} • Status: ${dispositionFormatado}${callidDisplay}
+                <div style="font-size: 0.95rem; color: #bbb; text-align: left;">
+                  Status: ${dispositionFormatado}
                 </div>
               </div>
             </div>
