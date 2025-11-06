@@ -16,11 +16,13 @@ const { transcreverComGemini } = require('./transcription-gemini');
  * Detecta o formato de áudio baseado na data da gravação
  * @param {string} calldate - Data da gravação (opcional)
  * @param {string} codigo - Código da gravação
+ * @param {string} companyCode - Código da empresa (opcional, necessário para MP3)
  * @returns {Object} Objeto com formato principal, lista de formatos e URLs
  */
-function detectarFormatoAudio(calldate, codigo) {
+function detectarFormatoAudio(calldate, codigo, companyCode = '') {
   let formatoPrincipal = 'wav';
   let formatosParaTentar = ['wav', 'mp3'];
+  let ehHoje = false;
 
   if (calldate) {
     try {
@@ -39,7 +41,7 @@ function detectarFormatoAudio(calldate, codigo) {
         hoje.getDate()
       );
 
-      const ehHoje = dataGravacaoSemHora.getTime() === hojeSemHora.getTime();
+      ehHoje = dataGravacaoSemHora.getTime() === hojeSemHora.getTime();
 
       if (ehHoje) {
         formatoPrincipal = 'wav';
@@ -55,11 +57,29 @@ function detectarFormatoAudio(calldate, codigo) {
     }
   }
 
+  const urlWav = `https://delorean.krolik.com.br/records/${codigo}.wav`;
+  
+  let urlMp3 = `https://delorean.krolik.com.br/records/${codigo}.mp3`;
+  
+  if (!ehHoje && calldate && companyCode) {
+    try {
+      const calldateStr = calldate.replace(/\+/g, ' ').replace(/%3A/g, ':');
+      const dataGravacao = new Date(calldateStr);
+      const ano = dataGravacao.getFullYear();
+      const mes = String(dataGravacao.getMonth() + 1).padStart(2, '0');
+      const dia = String(dataGravacao.getDate()).padStart(2, '0');
+      const dataFormatada = `${ano}-${mes}-${dia}`;
+      urlMp3 = `https://delorean.krolik.com.br/records/${dataFormatada}/${companyCode}/${codigo}.mp3`;
+    } catch (e) {
+      console.warn('[detectarFormatoAudio] Erro ao formatar data para URL MP3:', e);
+    }
+  }
+
   return {
     formato: formatoPrincipal,
     tentar: formatosParaTentar,
-    urlWav: `https://delorean.krolik.com.br/records/${codigo}.wav`,
-    urlMp3: `https://delorean.krolik.com.br/records/${codigo}.mp3`
+    urlWav: urlWav,
+    urlMp3: urlMp3
   };
 }
 
@@ -88,9 +108,34 @@ async function baixarAudio(url, timeout = 30000) {
         return reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
       }
 
+      const contentType = res.headers['content-type'] || '';
+      const isHtmlError = contentType.includes('text/html') && !contentType.includes('audio');
+
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => resolve(Buffer.concat(chunks)));
+      res.on('end', () => {
+        const buffer = Buffer.concat(chunks);
+        
+        if (isHtmlError || buffer.length < 1000) {
+          const tamanhoVerificacao = Math.min(500, buffer.length);
+          const errorText = buffer.toString('utf8', 0, tamanhoVerificacao);
+          const errorTextLower = errorText.toLowerCase();
+          
+          if (errorTextLower.includes('error in exception handler')) {
+            return reject(new Error(`Servidor retornou página de erro: Error in exception handler`));
+          }
+          
+          if (isHtmlError && (errorTextLower.includes('error') || errorText.includes('404') || errorText.includes('Not Found'))) {
+            return reject(new Error(`Servidor retornou página de erro HTML: ${errorText.trim().substring(0, 100)}`));
+          }
+          
+          if (buffer.length < 1000 && (errorTextLower.includes('error') || errorText.includes('404') || errorText.includes('Not Found'))) {
+            return reject(new Error(`Servidor retornou resposta inválida: ${errorText.trim().substring(0, 100)}`));
+          }
+        }
+        
+        resolve(buffer);
+      });
     });
 
     req.on('error', reject);
@@ -189,7 +234,7 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
   let codigoGravacao = codigo;
 
   if (!urlFinal && codigoGravacao) {
-    const formatoInfo = detectarFormatoAudio(calldate, codigoGravacao);
+    const formatoInfo = detectarFormatoAudio(calldate, codigoGravacao, companyCode);
     urlFinal = formatoInfo.formato === 'wav' ? formatoInfo.urlWav : formatoInfo.urlMp3;
   }
 
@@ -204,28 +249,127 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
 
   log('info', 'Iniciando transcrição', { url: urlFinal, companyCode });
 
-  // Detectar formato e baixar áudio
-  const formatoInfo = detectarFormatoAudio(calldate, codigoGravacao || '');
   let audioBuffer = null;
   let mimeType = null;
   let urlAudioReal = null;
   let tentativas = 0;
 
-  for (const formato of formatoInfo.tentar) {
-    try {
-      const urlFormatada = formato === 'wav' ? formatoInfo.urlWav : formatoInfo.urlMp3;
-      log('info', `Tentando baixar áudio (${formato})`, { url: urlFormatada });
+  // Se a URL fornecida contém .mp3 ou .wav, usar diretamente sem tentar detectar formato
+  const urlFornecida = audioUrl || '';
+  const temMp3 = urlFornecida.includes('.mp3');
+  const temWav = urlFornecida.includes('.wav');
+  
+  log('info', 'Verificando URL fornecida', { urlFornecida, temMp3, temWav, audioUrl });
+  
+  if (urlFornecida && (temMp3 || temWav)) {
+    urlFinal = urlFornecida;
+    
+    if (urlFornecida.includes('.mp3')) {
+      log('info', 'URL MP3 fornecida diretamente, usando URL fornecida', { url: urlFinal });
+      try {
+        audioBuffer = await baixarAudio(urlFinal, 30000);
+        mimeType = 'audio/mpeg';
+        urlAudioReal = urlFinal;
+        tentativas = 1;
+      } catch (error) {
+        log('warn', `Falha ao baixar MP3 da URL fornecida`, { error: error.message });
+        throw new Error(`Não foi possível baixar áudio da URL fornecida: ${error.message}`);
+      }
+    } else if (urlFornecida.includes('.wav')) {
+      log('info', 'URL WAV fornecida diretamente, tentando baixar', { url: urlFinal });
+      try {
+        audioBuffer = await baixarAudio(urlFinal, 30000);
+        
+        const audioText = audioBuffer.toString('utf8', 0, Math.min(100, audioBuffer.length));
+        const isErrorPage = audioText.includes('Error in exception handler') || 
+                           audioText.includes('error') || 
+                           audioText.includes('Error') ||
+                           audioText.includes('404') ||
+                           audioText.includes('Not Found');
+        
+        if (audioBuffer.length < 1000 || isErrorPage) {
+          const motivo = isErrorPage ? 'página de erro do servidor' : `muito pequeno (${audioBuffer.length} bytes)`;
+          log('warn', `WAV inválido: ${motivo}. Tentando MP3 como fallback...`);
+          audioBuffer = null;
+          throw new Error(`WAV inválido: ${motivo}`);
+        }
+        
+        mimeType = 'audio/wav';
+        urlAudioReal = urlFinal;
+        tentativas = 1;
+      } catch (error) {
+        log('warn', `Falha ao baixar WAV da URL fornecida`, { error: error.message });
+        
+        if (codigoGravacao && calldate && companyCode) {
+          log('info', 'Tentando construir e baixar URL MP3 como fallback');
+          try {
+            const formatoInfo = detectarFormatoAudio(calldate, codigoGravacao, companyCode);
+            const urlMp3Fallback = formatoInfo.urlMp3;
+            log('info', `Tentando baixar MP3 como fallback`, { url: urlMp3Fallback });
+            
+            audioBuffer = await baixarAudio(urlMp3Fallback, 30000);
+            
+            const audioTextMp3 = audioBuffer.toString('utf8', 0, Math.min(100, audioBuffer.length));
+            const isErrorPageMp3 = audioTextMp3.includes('Error in exception handler') || 
+                                  audioTextMp3.includes('error') || 
+                                  audioTextMp3.includes('Error') ||
+                                  audioTextMp3.includes('404') ||
+                                  audioTextMp3.includes('Not Found');
+            
+            if (audioBuffer.length < 1000 || isErrorPageMp3) {
+              throw new Error('MP3 também inválido ou erro do servidor');
+            }
+            
+            mimeType = 'audio/mpeg';
+            urlAudioReal = urlMp3Fallback;
+            tentativas = 2;
+            log('info', 'MP3 baixado com sucesso como fallback do WAV');
+          } catch (mp3Error) {
+            log('warn', `Falha ao baixar MP3 como fallback`, { error: mp3Error.message });
+            throw new Error(`Não foi possível baixar áudio em nenhum formato. WAV: ${error.message}, MP3: ${mp3Error.message}`);
+          }
+        } else {
+          throw new Error(`Não foi possível baixar áudio da URL fornecida: ${error.message}`);
+        }
+      }
+    }
+  } else {
+    const formatoInfo = detectarFormatoAudio(calldate, codigoGravacao || '', companyCode);
+    let tentativas = 0;
 
-      audioBuffer = await baixarAudio(urlFormatada, 30000);
-      mimeType = formato === 'wav' ? 'audio/wav' : 'audio/mpeg';
-      urlAudioReal = urlFormatada;
-      tentativas++;
-      
-      break;
-    } catch (error) {
-      log('warn', `Falha ao baixar ${formato}`, { error: error.message });
-      if (tentativas === formatoInfo.tentar.length - 1) {
-        throw new Error(`Não foi possível baixar áudio em nenhum formato. Último erro: ${error.message}`);
+    for (const formato of formatoInfo.tentar) {
+      try {
+        const urlFormatada = formato === 'wav' ? formatoInfo.urlWav : formatoInfo.urlMp3;
+        log('info', `Tentando baixar áudio (${formato})`, { url: urlFormatada });
+
+        audioBuffer = await baixarAudio(urlFormatada, 30000);
+        
+        if (formato === 'wav') {
+          const audioText = audioBuffer.toString('utf8', 0, Math.min(100, audioBuffer.length));
+          const isErrorPage = audioText.includes('Error in exception handler') || 
+                             audioText.includes('error') || 
+                             audioText.includes('Error') ||
+                             audioText.includes('404') ||
+                             audioText.includes('Not Found');
+          
+          if (audioBuffer.length < 1000 || isErrorPage) {
+            const motivo = isErrorPage ? 'página de erro do servidor' : `muito pequeno (${audioBuffer.length} bytes)`;
+            log('warn', `WAV inválido: ${motivo}. Tentando próximo formato...`);
+            audioBuffer = null;
+            throw new Error(`WAV inválido: ${motivo}`);
+          }
+        }
+        
+        mimeType = formato === 'wav' ? 'audio/wav' : 'audio/mpeg';
+        urlAudioReal = urlFormatada;
+        tentativas++;
+        
+        break;
+      } catch (error) {
+        log('warn', `Falha ao baixar ${formato}`, { error: error.message });
+        if (tentativas === formatoInfo.tentar.length - 1) {
+          throw new Error(`Não foi possível baixar áudio em nenhum formato. Último erro: ${error.message}`);
+        }
       }
     }
   }
@@ -235,7 +379,7 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
   }
 
   if (!urlAudioReal) {
-    urlAudioReal = urlFinal || (formatoInfo.tentar.length > 0 ? (formatoInfo.tentar[0] === 'wav' ? formatoInfo.urlWav : formatoInfo.urlMp3) : '');
+    urlAudioReal = urlFinal;
   }
 
   log('info', 'Áudio baixado com sucesso', {
@@ -246,10 +390,48 @@ async function transcreverAudio(audioUrl, codigo, companyCode, calldate, logCall
     urlUsada: urlAudioReal
   });
   
-  if (audioBuffer.length < 1000) {
-    log('warn', 'Áudio muito pequeno, pode estar corrompido ou vazio', {
-      tamanho: audioBuffer.length
+  const audioText = audioBuffer.toString('utf8', 0, Math.min(100, audioBuffer.length));
+  const isErrorPage = audioText.includes('Error in exception handler') || 
+                     audioText.includes('error') || 
+                     audioText.includes('Error') ||
+                     audioText.includes('404') ||
+                     audioText.includes('Not Found');
+  
+  if (audioBuffer.length < 1000 || isErrorPage) {
+    const motivo = isErrorPage ? 'página de erro do servidor' : `muito pequeno (${audioBuffer.length} bytes)`;
+    log('warn', `Áudio inválido: ${motivo}`, {
+      tamanho: audioBuffer.length,
+      preview: audioText.substring(0, 50)
     });
+    
+    if (mimeType === 'audio/wav' && codigoGravacao && calldate && companyCode && !urlFornecida.includes('.mp3')) {
+      log('info', 'WAV inválido detectado após download. Tentando MP3 como fallback...');
+      try {
+        const formatoInfo = detectarFormatoAudio(calldate, codigoGravacao, companyCode);
+        const urlMp3Fallback = formatoInfo.urlMp3;
+        log('info', `Tentando baixar MP3 como fallback`, { url: urlMp3Fallback });
+        
+        const audioBufferMp3 = await baixarAudio(urlMp3Fallback, 30000);
+        const audioTextMp3 = audioBufferMp3.toString('utf8', 0, Math.min(100, audioBufferMp3.length));
+        const isErrorPageMp3 = audioTextMp3.includes('Error in exception handler') || 
+                              audioTextMp3.includes('error') || 
+                              audioTextMp3.includes('Error') ||
+                              audioTextMp3.includes('404') ||
+                              audioTextMp3.includes('Not Found');
+        
+        if (audioBufferMp3.length >= 1000 && !isErrorPageMp3) {
+          audioBuffer = audioBufferMp3;
+          mimeType = 'audio/mpeg';
+          urlAudioReal = urlMp3Fallback;
+          log('info', 'MP3 baixado com sucesso como fallback do WAV inválido');
+        } else {
+          log('warn', 'MP3 também inválido, mantendo WAV original');
+        }
+      } catch (mp3Error) {
+        log('warn', `Falha ao baixar MP3 como fallback`, { error: mp3Error.message });
+        log('warn', 'Continuando com WAV inválido (pode não funcionar corretamente)');
+      }
+    }
   }
 
   // Buscar tokens da empresa
