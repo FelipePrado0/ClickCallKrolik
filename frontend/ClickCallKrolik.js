@@ -877,9 +877,26 @@ class ClickCallManager {
           }
         }
 
-        audioUrl = ehGravacaoDeHoje 
-          ? `https://delorean.krolik.com.br/records/${codigo}.wav`
-          : `https://delorean.krolik.com.br/records/${codigo}.mp3`;
+        if (ehGravacaoDeHoje) {
+          audioUrl = `https://delorean.krolik.com.br/records/${codigo}.wav`;
+        } else {
+          if (calldate && companyCode) {
+            try {
+              const calldateStr = calldate.replace(/\+/g, ' ').replace(/%3A/g, ':');
+              const dataGravacao = new Date(calldateStr);
+              const ano = dataGravacao.getFullYear();
+              const mes = String(dataGravacao.getMonth() + 1).padStart(2, '0');
+              const dia = String(dataGravacao.getDate()).padStart(2, '0');
+              const dataFormatada = `${ano}-${mes}-${dia}`;
+              audioUrl = `https://delorean.krolik.com.br/records/${dataFormatada}/${companyCode}/${codigo}.mp3`;
+            } catch (e) {
+              console.warn('[transcreverAudio] Erro ao formatar data para URL MP3:', e);
+              audioUrl = `https://delorean.krolik.com.br/records/${codigo}.mp3`;
+            }
+          } else {
+            audioUrl = `https://delorean.krolik.com.br/records/${codigo}.mp3`;
+          }
+        }
       }
 
       if (!codigo && audioUrl) {
@@ -924,9 +941,10 @@ class ClickCallManager {
 
       if (data.success && data.transcription) {
 
+        const providerNormalizado = (data.provider || 'unknown').toLowerCase();
         this.transcriptions[codigo] = {
           texto: data.transcription || '',
-          provider: data.provider || 'unknown',
+          provider: providerNormalizado,
           model: data.model || 'unknown',
           duration: data.duration || 0,
           requestId: data.requestId || '',
@@ -947,6 +965,170 @@ class ClickCallManager {
       this.showTranscriptionErrorModal(error.message);
     } finally {
 
+      delete this.transcribing[codigo];
+    }
+  }
+
+  async retranscreverAudio(codigo, index, event) {
+    if (event) {
+      event.stopPropagation();
+    }
+
+    if (this.transcribing[codigo]) {
+      return;
+    }
+
+    this.loadContactsFromStorage();
+    
+    let gravacao = null;
+    for (const contato of this.contacts) {
+      if (contato.gravacoes && contato.gravacoes.length > 0) {
+        gravacao = contato.gravacoes.find(g => g.codigo === codigo);
+        if (gravacao) {
+          break;
+        }
+      }
+    }
+
+    if (!gravacao) {
+      alert('❌ Gravação não encontrada.');
+      return;
+    }
+
+    let companyCode = gravacao.company_id;
+    
+    if (!companyCode && gravacao.src) {
+      const srcString = String(gravacao.src);
+      if (srcString.length >= 3) {
+        companyCode = srcString.substring(0, 3);
+      }
+    }
+    
+    if (!companyCode) {
+      console.error('[retranscreverAudio] ERRO: company_id não disponível na gravação');
+      alert('❌ Código da empresa não disponível. Não é possível retranscrever.');
+      return;
+    }
+
+    companyCode = String(companyCode).trim();
+
+    try {
+      const checkTokenResponse = await fetch(`${this.webhookServerUrl}/api/check-token?companyCode=${encodeURIComponent(companyCode)}`);
+      if (!checkTokenResponse.ok) {
+        throw new Error(`HTTP ${checkTokenResponse.status}`);
+      }
+      const checkTokenData = await checkTokenResponse.json();
+      
+      if (!checkTokenData.hasToken) {
+        this.showNoTokenModal();
+        return;
+      }
+    } catch (error) {
+      console.error('[retranscreverAudio] Erro ao verificar token:', error);
+      this.showNoTokenModal();
+      return;
+    }
+
+    this.transcribing[codigo] = true;
+
+    this.mostrarLoadingTranscricao(codigo, index);
+
+    try {
+      let audioUrl = gravacao.url || '';
+      
+      if (!audioUrl && codigo) {
+        const calldate = gravacao.calldate || '';
+        let ehGravacaoDeHoje = false;
+
+        if (calldate) {
+          try {
+            const calldateStr = calldate.replace(/\+/g, ' ').replace(/%3A/g, ':');
+            const dataGravacao = new Date(calldateStr);
+            const hoje = new Date();
+
+            const dataGravacaoSemHora = new Date(
+              dataGravacao.getFullYear(),
+              dataGravacao.getMonth(),
+              dataGravacao.getDate()
+            );
+            const hojeSemHora = new Date(
+              hoje.getFullYear(),
+              hoje.getMonth(),
+              hoje.getDate()
+            );
+
+            ehGravacaoDeHoje = dataGravacaoSemHora.getTime() === hojeSemHora.getTime();
+          } catch (e) {
+            console.warn('[retranscreverAudio] Erro ao parsear data:', e);
+          }
+        }
+
+        if (ehGravacaoDeHoje) {
+          audioUrl = `https://delorean.krolik.com.br/records/${codigo}.wav`;
+        } else {
+          if (calldate && companyCode) {
+            try {
+              const calldateStr = calldate.replace(/\+/g, ' ').replace(/%3A/g, ':');
+              const dataGravacao = new Date(calldateStr);
+              const ano = dataGravacao.getFullYear();
+              const mes = String(dataGravacao.getMonth() + 1).padStart(2, '0');
+              const dia = String(dataGravacao.getDate()).padStart(2, '0');
+              const dataFormatada = `${ano}-${mes}-${dia}`;
+              audioUrl = `https://delorean.krolik.com.br/records/${dataFormatada}/${companyCode}/${codigo}.mp3`;
+            } catch (e) {
+              console.warn('[retranscreverAudio] Erro ao formatar data para URL MP3:', e);
+              audioUrl = `https://delorean.krolik.com.br/records/${codigo}.mp3`;
+            }
+          } else {
+            audioUrl = `https://delorean.krolik.com.br/records/${codigo}.mp3`;
+          }
+        }
+      }
+
+      const response = await fetch(`${this.webhookServerUrl}/api/transcribe`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          audioUrl: audioUrl,
+          codigo: codigo,
+          companyCode: companyCode,
+          calldate: gravacao.calldate || ''
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Erro HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success && data.transcription) {
+        const providerNormalizado = (data.provider || 'unknown').toLowerCase();
+        this.transcriptions[codigo] = {
+          texto: data.transcription || '',
+          provider: providerNormalizado,
+          model: data.model || 'unknown',
+          duration: data.duration || 0,
+          requestId: data.requestId || '',
+          timestamp: new Date().toISOString()
+        };
+
+        this.saveTranscriptionsToStorage();
+        this.exibirTranscricao(codigo, index);
+      } else {
+        throw new Error(data.message || 'Erro desconhecido na transcrição');
+      }
+
+    } catch (error) {
+      console.error('[retranscreverAudio] ❌ Erro:', error);
+
+      this.mostrarErroTranscricao(codigo, index, error.message);
+
+      this.showTranscriptionErrorModal(error.message);
+    } finally {
       delete this.transcribing[codigo];
     }
   }
@@ -1046,26 +1228,56 @@ class ClickCallManager {
     transcricaoElement.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
             <div style="color: #c8007e; font-size: 0.9rem; font-weight: 600;">
-              📝 Transcrição (${transcricao.provider === 'openai' ? 'OpenAI' : 'Gemini'})
+              📝 Transcrição (${transcricao.provider === 'openai' ? 'OpenAI' : transcricao.provider === 'gemini' ? 'Gemini' : transcricao.provider || 'Unknown'})
             </div>
-            <button 
-              onclick="copiarTranscricao('${codigo}', ${index}, event)"
-              style="
-                background: rgba(123,0,81,0.8);
-                color: #fff;
-                border: none;
-                border-radius: 8px;
-                padding: 6px 12px;
-                font-size: 0.85rem;
-                cursor: pointer;
-                transition: background 0.2s;
-              "
-              onmouseover="this.style.background='rgba(123,0,81,1)'"
-              onmouseout="this.style.background='rgba(123,0,81,0.8)'"
-              title="Copiar transcrição"
-            >
-              📋 Copiar
-            </button>
+            <div style="display: flex; gap: 6px;">
+              <button 
+                onclick="window.clickCallManager.retranscreverAudio('${codigo}', ${index}, event)"
+                style="
+                  background: rgba(52, 152, 219, 0.8);
+                  color: #fff;
+                  border: none;
+                  border-radius: 6px;
+                  padding: 6px 10px;
+                  font-size: 1rem;
+                  cursor: pointer;
+                  transition: background 0.2s;
+                  width: 36px;
+                  height: 36px;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                "
+                onmouseover="this.style.background='rgba(52, 152, 219, 1)'"
+                onmouseout="this.style.background='rgba(52, 152, 219, 0.8)'"
+                title="Retranscrever áudio"
+              >
+                🔄
+              </button>
+              <button 
+                onclick="copiarTranscricao('${codigo}', ${index}, event)"
+                style="
+                  background: rgba(123,0,81,0.8);
+                  color: #fff;
+                  border: none;
+                  border-radius: 6px;
+                  padding: 6px 10px;
+                  font-size: 1rem;
+                  cursor: pointer;
+                  transition: background 0.2s;
+                  width: 36px;
+                  height: 36px;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                "
+                onmouseover="this.style.background='rgba(123,0,81,1)'"
+                onmouseout="this.style.background='rgba(123,0,81,0.8)'"
+                title="Copiar transcrição"
+              >
+                📋
+              </button>
+            </div>
           </div>
           <div style="
             color: #fff;
@@ -1562,9 +1774,29 @@ class ClickCallManager {
           }
 
           urlGravacaoWav = `https://delorean.krolik.com.br/records/${gravacao.codigo}.wav`;
-          urlGravacaoMp3 = `https://delorean.krolik.com.br/records/${gravacao.codigo}.mp3`;
-
-          urlGravacao = ehGravacaoDeHoje ? urlGravacaoWav : urlGravacaoMp3;
+          
+          if (ehGravacaoDeHoje) {
+            urlGravacaoMp3 = `https://delorean.krolik.com.br/records/${gravacao.codigo}.mp3`;
+            urlGravacao = urlGravacaoWav;
+          } else {
+            if (gravacao.calldate && gravacao.company_id) {
+              try {
+                const calldateStr = gravacao.calldate.replace(/\+/g, ' ').replace(/%3A/g, ':');
+                const dataGravacao = new Date(calldateStr);
+                const ano = dataGravacao.getFullYear();
+                const mes = String(dataGravacao.getMonth() + 1).padStart(2, '0');
+                const dia = String(dataGravacao.getDate()).padStart(2, '0');
+                const dataFormatada = `${ano}-${mes}-${dia}`;
+                urlGravacaoMp3 = `https://delorean.krolik.com.br/records/${dataFormatada}/${gravacao.company_id}/${gravacao.codigo}.mp3`;
+              } catch (e) {
+                console.warn('[displayGravacoes] Erro ao formatar data para URL MP3:', e);
+                urlGravacaoMp3 = `https://delorean.krolik.com.br/records/${gravacao.codigo}.mp3`;
+              }
+            } else {
+              urlGravacaoMp3 = `https://delorean.krolik.com.br/records/${gravacao.codigo}.mp3`;
+            }
+            urlGravacao = urlGravacaoMp3;
+          }
         }
 
         const urlGravacaoFinal = urlGravacao;
@@ -1717,26 +1949,56 @@ class ClickCallManager {
                 <!-- Transcrição existente -->
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                   <div style="color: #c8007e; font-size: 0.9rem; font-weight: 600;">
-                    📝 Transcrição (${this.transcriptions[gravacao.codigo].provider === 'openai' ? 'OpenAI' : 'Gemini'})
+                    📝 Transcrição (${this.transcriptions[gravacao.codigo].provider === 'openai' ? 'OpenAI' : this.transcriptions[gravacao.codigo].provider === 'gemini' ? 'Gemini' : this.transcriptions[gravacao.codigo].provider || 'Unknown'})
                   </div>
-                  <button 
-                    onclick="copiarTranscricao('${this.escapeHtml(gravacao.codigo || '')}', ${index}, event)"
-                    style="
-                      background: rgba(123,0,81,0.8);
-                      color: #fff;
-                      border: none;
-                      border-radius: 8px;
-                      padding: 6px 12px;
-                      font-size: 0.85rem;
-                      cursor: pointer;
-                      transition: background 0.2s;
-                    "
-                    onmouseover="this.style.background='rgba(123,0,81,1)'"
-                    onmouseout="this.style.background='rgba(123,0,81,0.8)'"
-                    title="Copiar transcrição"
-                  >
-                    📋 Copiar
-                  </button>
+                  <div style="display: flex; gap: 6px;">
+                    <button 
+                      onclick="window.clickCallManager.retranscreverAudio('${this.escapeHtml(gravacao.codigo || '')}', ${index}, event)"
+                      style="
+                        background: rgba(52, 152, 219, 0.8);
+                        color: #fff;
+                        border: none;
+                        border-radius: 6px;
+                        padding: 6px 10px;
+                        font-size: 1rem;
+                        cursor: pointer;
+                        transition: background 0.2s;
+                        width: 36px;
+                        height: 36px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                      "
+                      onmouseover="this.style.background='rgba(52, 152, 219, 1)'"
+                      onmouseout="this.style.background='rgba(52, 152, 219, 0.8)'"
+                      title="Retranscrever áudio"
+                    >
+                      🔄
+                    </button>
+                    <button 
+                      onclick="copiarTranscricao('${this.escapeHtml(gravacao.codigo || '')}', ${index}, event)"
+                      style="
+                        background: rgba(123,0,81,0.8);
+                        color: #fff;
+                        border: none;
+                        border-radius: 6px;
+                        padding: 6px 10px;
+                        font-size: 1rem;
+                        cursor: pointer;
+                        transition: background 0.2s;
+                        width: 36px;
+                        height: 36px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                      "
+                      onmouseover="this.style.background='rgba(123,0,81,1)'"
+                      onmouseout="this.style.background='rgba(123,0,81,0.8)'"
+                      title="Copiar transcrição"
+                    >
+                      📋
+                    </button>
+                  </div>
                 </div>
                 <div style="
                   color: #fff;

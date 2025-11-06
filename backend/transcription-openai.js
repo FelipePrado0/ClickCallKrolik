@@ -8,6 +8,40 @@ const OpenAI = require('openai');
  * @returns {Promise<string>} Texto transcrito
  */
 async function transcreverComOpenAI(audioBuffer, token, mimeType = 'audio/wav') {
+  const isMp3 = mimeType.includes('mp3') || mimeType.includes('mpeg');
+  
+  if (isMp3) {
+    const FormData = require('form-data');
+    const axios = require('axios');
+
+    const form = new FormData();
+    form.append('file', audioBuffer, {
+      filename: 'audio.mp3',
+      contentType: mimeType
+    });
+    form.append('model', 'whisper-1');
+    form.append('language', 'pt');
+    form.append('response_format', 'json');
+
+    try {
+      const response = await axios.post(
+        'https://api.openai.com/v1/audio/transcriptions',
+        form,
+        {
+          headers: {
+            ...form.getHeaders(),
+            'Authorization': `Bearer ${token}`
+          },
+          timeout: 60000
+        }
+      );
+
+      return response.data.text;
+    } catch (error) {
+      throw new Error(`OpenAI API error: ${error.response?.data?.error?.message || error.message}`);
+    }
+  }
+
   const openai = new OpenAI({
     apiKey: token,
     timeout: 60000
@@ -28,14 +62,17 @@ async function transcreverComOpenAI(audioBuffer, token, mimeType = 'audio/wav') 
     } catch (error) {
       lastError = error;
 
-      if (attempt === 1 && (error.message.includes('file') || error.message.includes('format'))) {
+      if (attempt === 1 && (error.message.includes('file') || error.message.includes('format') || error.message.includes('multipart'))) {
         try {
           const FormData = require('form-data');
           const axios = require('axios');
 
           const form = new FormData();
+          const extensao = mimeType.includes('mp3') || mimeType.includes('mpeg') ? 'mp3' : 'wav';
+          const filename = `audio.${extensao}`;
+          
           form.append('file', audioBuffer, {
-            filename: 'audio.wav',
+            filename: filename,
             contentType: mimeType
           });
           form.append('model', 'whisper-1');
