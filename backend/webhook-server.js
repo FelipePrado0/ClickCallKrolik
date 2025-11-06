@@ -303,7 +303,10 @@ function convertBodyToString(body) {
   if (typeof body === 'object' && !Array.isArray(body)) {
     const params = new URLSearchParams();
     Object.keys(body).forEach(key => {
-      params.append(key, body[key]);
+      const value = body[key];
+      if (value !== undefined && value !== null) {
+        params.append(key, String(value));
+      }
     });
     return params.toString();
   }
@@ -372,8 +375,28 @@ app.post('/webhook/delorean', (req, res) => {
   }
   
   try {
+    // Log do body recebido antes de converter
+    structuredLog('debug', requestId, 'Body recebido do Delorean', {
+      bodyType: typeof req.body,
+      bodyIsObject: typeof req.body === 'object',
+      bodyKeys: typeof req.body === 'object' ? Object.keys(req.body) : [],
+      bodyCalldate: typeof req.body === 'object' ? req.body.calldate : null,
+      bodyCall_date: typeof req.body === 'object' ? req.body.call_date : null,
+      bodyDate: typeof req.body === 'object' ? req.body.date : null,
+      contentType: req.headers['content-type']
+    });
+    
     // Converter body para string URL-encoded para armazenamento
     const webhookString = convertBodyToString(req.body);
+    
+    // Log da string convertida
+    structuredLog('debug', requestId, 'Webhook convertido para string', {
+      webhookStringLength: webhookString.length,
+      webhookStringPreview: webhookString.substring(0, 200),
+      hasCalldate: webhookString.includes('calldate'),
+      hasCall_date: webhookString.includes('call_date'),
+      hasDate: webhookString.includes('date')
+    });
     
     // Validar tamanho do body
     const sizeValidation = validateBodySize(webhookString);
@@ -413,7 +436,7 @@ app.post('/webhook/delorean', (req, res) => {
     const dst = params.get('dst');
     const userfield = params.get('userfield');
     const callid = params.get('callid');
-    const calldate = params.get('calldate');
+    const calldate = params.get('calldate') || params.get('call_date') || params.get('date') || '';
     const disposition = params.get('disposition');
     
     structuredLog('info', requestId, 'Campos extraídos do webhook', {
@@ -422,6 +445,10 @@ app.post('/webhook/delorean', (req, res) => {
       userfield,
       callid,
       calldate,
+      calldateRaw: params.get('calldate'),
+      call_date: params.get('call_date'),
+      date: params.get('date'),
+      allParams: Array.from(params.keys()),
       disposition
     });
     

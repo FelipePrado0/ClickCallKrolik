@@ -729,7 +729,7 @@ class ClickCallManager {
 
     let link = `https://delorean.krolik.com.br/services/call?ramal=${encodeURIComponent(ramal)}&numero=${encodeURIComponent(numeroFormatado)}`;
     if (contatoNome && contatoNome.trim() !== '') {
-      link += `&callid=${encodeURIComponent(contatoNome.trim())}`;
+      link += `&key=${encodeURIComponent(contatoNome.trim())}`;
     }
 
     return `<button type="button" class="call-button" title="Fazer chamada" data-call-url="${link}">📞 Ligar</button>`;
@@ -2560,9 +2560,19 @@ class ClickCallManager {
 
               const params = new URLSearchParams();
               Object.keys(dataToProcess).forEach(key => {
-                params.append(key, dataToProcess[key]);
+                const value = dataToProcess[key];
+                if (value !== undefined && value !== null) {
+                  params.append(key, String(value));
+                }
               });
               dataToProcess = params.toString();
+            }
+            
+            if (typeof dataToProcess === 'string') {
+              console.log('[startWebhookPolling] Dados recebidos do backend (delorean_raw):', dataToProcess.substring(0, 200));
+              const testParams = new URLSearchParams(dataToProcess);
+              const testCalldate = testParams.get('calldate');
+              console.log('[startWebhookPolling] calldate extraído:', testCalldate);
             }
           }
 
